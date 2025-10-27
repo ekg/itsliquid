@@ -68,8 +68,8 @@ impl eframe::App for InteractiveApp {
                 egui::Sense::click_and_drag()
             );
             
-            // Handle mouse interaction
-            if response.dragged() {
+            // Handle left-click drag for fluid pulling
+            if response.dragged_by(egui::PointerButton::Primary) {
                 if let Some(pos) = response.interact_pointer_pos() {
                     let x = ((pos.x - rect.left()) / self.cell_size) as usize;
                     let y = ((pos.y - rect.top()) / self.cell_size) as usize;
@@ -94,8 +94,8 @@ impl eframe::App for InteractiveApp {
                         }
                     }
                 }
-            } else if response.drag_stopped() {
-                // Release - create vortex effect
+            } else if response.drag_stopped_by(egui::PointerButton::Primary) {
+                // Release left button - create vortex effect
                 if let Some(pos) = response.interact_pointer_pos() {
                     let x = ((pos.x - rect.left()) / self.cell_size) as usize;
                     let y = ((pos.y - rect.top()) / self.cell_size) as usize;
