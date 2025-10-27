@@ -11,8 +11,6 @@ pub struct InteractiveApp {
     mouse_current_pos: Option<egui::Pos2>,
     dye_colors: Vec<(f32, f32, f32)>,
     current_dye_index: usize,
-    right_button_held: bool,
-    last_dye_pos: Option<egui::Pos2>,
 }
 
 impl InteractiveApp {
@@ -34,8 +32,6 @@ impl InteractiveApp {
                 (0.0, 1.0, 1.0), // Cyan
             ],
             current_dye_index: 0,
-            right_button_held: false,
-            last_dye_pos: None,
         }
     }
 }
@@ -139,57 +135,65 @@ impl eframe::App for InteractiveApp {
             
             // Handle right-click for dye injection
             if response.secondary_clicked() {
-                self.right_button_held = true;
-                self.last_dye_pos = response.interact_pointer_pos();
-            }
-            
-            // Check if right button is no longer held
-            if self.right_button_held && !ui.input(|i| i.pointer.secondary_down()) {
-                self.right_button_held = false;
-                self.last_dye_pos = None;
-            }
-            
-            // Continuous dye injection while right button is held
-            if self.right_button_held {
                 if let Some(pos) = response.interact_pointer_pos() {
-                    // Only inject dye if mouse has moved significantly or at regular intervals
-                    let should_inject = match self.last_dye_pos {
-                        Some(last_pos) => {
-                            let distance = (pos - last_pos).length();
-                            distance > self.cell_size * 0.5 || self.frame_count % 3 == 0
-                        }
-                        None => true,
-                    };
+                    let x = ((pos.x - rect.left()) / self.cell_size) as usize;
+                    let y = ((pos.y - rect.top()) / self.cell_size) as usize;
                     
-                    if should_inject {
-                        let x = ((pos.x - rect.left()) / self.cell_size) as usize;
-                        let y = ((pos.y - rect.top()) / self.cell_size) as usize;
+                    if x < self.simulation.width && y < self.simulation.height {
+                        // Add dye droplet
+                        let dye_color = self.dye_colors[self.current_dye_index];
                         
-                        if x < self.simulation.width && y < self.simulation.height {
-                            // Add dye droplet
-                            let dye_color = self.dye_colors[self.current_dye_index];
-                            
-                            // Add dye in a small circular pattern
-                            for dy in -2..=2 {
-                                for dx in -2..=2 {
-                                    let px = (x as i32 + dx) as usize;
-                                    let py = (y as i32 + dy) as usize;
-                                    
-                                    if px < self.simulation.width && py < self.simulation.height {
-                                        let dist_sq = (dx * dx + dy * dy) as f32;
-                                        if dist_sq <= 4.0 {
-                                            let falloff = 1.0 - dist_sq / 4.0;
-                                            self.simulation.add_dye(px, py, (
-                                                dye_color.0 * falloff,
-                                                dye_color.1 * falloff,
-                                                dye_color.2 * falloff
-                                            ));
-                                        }
+                        // Add dye in a small circular pattern
+                        for dy in -2..=2 {
+                            for dx in -2..=2 {
+                                let px = (x as i32 + dx) as usize;
+                                let py = (y as i32 + dy) as usize;
+                                
+                                if px < self.simulation.width && py < self.simulation.height {
+                                    let dist_sq = (dx * dx + dy * dy) as f32;
+                                    if dist_sq <= 4.0 {
+                                        let falloff = 1.0 - dist_sq / 4.0;
+                                        self.simulation.add_dye(px, py, (
+                                            dye_color.0 * falloff,
+                                            dye_color.1 * falloff,
+                                            dye_color.2 * falloff
+                                        ));
                                     }
                                 }
                             }
-                            
-                            self.last_dye_pos = Some(pos);
+                        }
+                    }
+                }
+            }
+            
+            // Continuous dye injection while right button is held and dragged
+            if response.dragged_by(egui::PointerButton::Secondary) {
+                if let Some(pos) = response.interact_pointer_pos() {
+                    let x = ((pos.x - rect.left()) / self.cell_size) as usize;
+                    let y = ((pos.y - rect.top()) / self.cell_size) as usize;
+                    
+                    if x < self.simulation.width && y < self.simulation.height {
+                        // Add dye droplet
+                        let dye_color = self.dye_colors[self.current_dye_index];
+                        
+                        // Add dye in a small circular pattern
+                        for dy in -2..=2 {
+                            for dx in -2..=2 {
+                                let px = (x as i32 + dx) as usize;
+                                let py = (y as i32 + dy) as usize;
+                                
+                                if px < self.simulation.width && py < self.simulation.height {
+                                    let dist_sq = (dx * dx + dy * dy) as f32;
+                                    if dist_sq <= 4.0 {
+                                        let falloff = 1.0 - dist_sq / 4.0;
+                                        self.simulation.add_dye(px, py, (
+                                            dye_color.0 * falloff * 0.3, // Reduce intensity for continuous stream
+                                            dye_color.1 * falloff * 0.3,
+                                            dye_color.2 * falloff * 0.3
+                                        ));
+                                    }
+                                }
+                            }
                         }
                     }
                 }
