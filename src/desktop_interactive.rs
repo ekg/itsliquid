@@ -11,6 +11,9 @@ pub struct InteractiveApp {
     mouse_current_pos: Option<egui::Pos2>,
     dye_colors: Vec<(f32, f32, f32)>,
     current_dye_index: usize,
+    resolution_scale: usize, // 1, 2, 4, 8, etc. - factor to scale base resolution
+    base_width: usize,
+    base_height: usize,
 }
 
 impl InteractiveApp {
@@ -32,6 +35,25 @@ impl InteractiveApp {
                 (0.0, 1.0, 1.0), // Cyan
             ],
             current_dye_index: 0,
+            resolution_scale: 1,
+            base_width: width,
+            base_height: height,
+        }
+    }
+    
+    fn change_resolution(&mut self, scale: usize) {
+        if scale != self.resolution_scale && scale >= 1 && scale <= 8 {
+            self.resolution_scale = scale;
+            let new_width = self.base_width * scale;
+            let new_height = self.base_height * scale;
+            
+            // Create new simulation with scaled resolution
+            self.simulation = InteractiveFluid::new(new_width, new_height);
+            
+            // Reset simulation state
+            self.mouse_dragging = false;
+            self.mouse_start_pos = None;
+            self.mouse_current_pos = None;
         }
     }
 }
@@ -54,6 +76,22 @@ impl eframe::App for InteractiveApp {
                         self.current_dye_index = i;
                     }
                 }
+            });
+            
+            ui.horizontal(|ui| {
+                ui.label("Resolution Scale:");
+                
+                // Resolution scale buttons (1x, 2x, 4x, 8x)
+                for &scale in &[1, 2, 4, 8] {
+                    let label = format!("{}x", scale);
+                    let is_current = self.resolution_scale == scale;
+                    
+                    if ui.selectable_label(is_current, label).clicked() {
+                        self.change_resolution(scale);
+                    }
+                }
+                
+                ui.label(format!(" ({}x{} cells)", self.simulation.width, self.simulation.height));
             });
             
             ui.separator();
@@ -261,8 +299,8 @@ impl eframe::App for InteractiveApp {
                 self.frame_count += 1;
             }
             
-            ui.label(format!("Frame: {} | Left-click+drag: Pull fluid | Right-click+hold: Stream dye | Cell Size: {:.1}", 
-                self.frame_count, self.cell_size));
+            ui.label(format!("Frame: {} | Resolution: {}x{} | Left-click+drag: Pull fluid | Right-click+hold: Stream dye | Cell Size: {:.1}", 
+                self.frame_count, self.simulation.width, self.simulation.height, self.cell_size));
         });
         
         ctx.request_repaint();
