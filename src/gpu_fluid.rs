@@ -63,7 +63,7 @@ impl GPUFluid {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("Fluid Simulation Device"),
-                    features: wgpu::Features::empty(),
+                    features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | wgpu::Features::CLEAR_TEXTURE,
                     limits: wgpu::Limits::default(),
                 },
                 None,

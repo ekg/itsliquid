@@ -28,7 +28,7 @@ impl MinimalGPUFluid {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("Minimal Fluid GPU"),
-                    required_features: wgpu::Features::empty(),
+                    required_features: wgpu::Features::CLEAR_TEXTURE,
                     required_limits: wgpu::Limits::downlevel_defaults(),
                 },
                 None,
@@ -80,7 +80,7 @@ impl MinimalGPUFluid {
         self.queue.submit(std::iter::once(encoder.finish()));
     }
     
-    pub fn add_dye(&mut self, x: u32, y: u32, color: (f32, f32, f32)) {
+    pub fn gpu_add_dye(&mut self, x: u32, y: u32, color: (f32, f32, f32)) {
         println!("GPU: Adding dye at ({}, {}) with color {:?}", x, y, color);
     }
     
@@ -88,8 +88,8 @@ impl MinimalGPUFluid {
         &self.dye_view
     }
     
-    pub fn width(&self) -> u32 { self.width }
-    pub fn height(&self) -> u32 { self.height }
+    pub fn gpu_width(&self) -> u32 { self.width }
+    pub fn gpu_height(&self) -> u32 { self.height }
 }
 
 impl crate::FluidSimulation for MinimalGPUFluid {
@@ -100,9 +100,9 @@ impl crate::FluidSimulation for MinimalGPUFluid {
     }
     
     fn add_dye(&mut self, x: usize, y: usize, color: (f32, f32, f32)) {
-        self.add_dye(x as u32, y as u32, color)
+        self.gpu_add_dye(x as u32, y as u32, color)
     }
     
-    fn width(&self) -> usize { self.width as usize }
-    fn height(&self) -> usize { self.height as usize }
+    fn width(&self) -> usize { self.gpu_width() as usize }
+    fn height(&self) -> usize { self.gpu_height() as usize }
 }

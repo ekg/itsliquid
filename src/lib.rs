@@ -15,6 +15,9 @@ pub mod analysis;
 pub mod gpu_minimal;
 
 #[cfg(feature = "gpu")]
+pub mod gpu_functional;
+
+#[cfg(feature = "gpu")]
 pub mod desktop_gpu;
 
 // Unified fluid simulation trait
@@ -31,7 +34,7 @@ pub trait FluidSimulation {
 pub type DefaultFluid = fluid_interactive::InteractiveFluid;
 
 #[cfg(all(feature = "gpu", not(feature = "cpu")))]
-pub type DefaultFluid = gpu_minimal::MinimalGPUFluid;
+pub type DefaultFluid = gpu_functional::FunctionalGPUFluid;
 
 pub use fluid_proper::FluidSolver;
 pub use fluid_working::WorkingFluid;
