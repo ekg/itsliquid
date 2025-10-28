@@ -1,15 +1,15 @@
 //! Core fluid simulation library for itsliquid
 
-pub mod fluid_simple;
-pub mod fluid_proper;
-pub mod fluid_working;
-pub mod fluid_final;
-pub mod fluid_interactive;
-pub mod render;
-pub mod export;
+pub mod analysis;
 pub mod desktop;
 pub mod desktop_interactive;
-pub mod analysis;
+pub mod export;
+pub mod fluid_final;
+pub mod fluid_interactive;
+pub mod fluid_proper;
+pub mod fluid_simple;
+pub mod fluid_working;
+pub mod render;
 
 #[cfg(feature = "gpu")]
 pub mod gpu_minimal;
@@ -36,12 +36,12 @@ pub type DefaultFluid = fluid_interactive::InteractiveFluid;
 #[cfg(all(feature = "gpu", not(feature = "cpu")))]
 pub type DefaultFluid = gpu_functional::FunctionalGPUFluid;
 
-pub use fluid_proper::FluidSolver;
-pub use fluid_working::WorkingFluid;
-pub use fluid_final::FluidFinal;
-pub use fluid_interactive::InteractiveFluid;
-pub use render::Renderer;
-pub use export::ImageExporter;
+pub use analysis::{AnalysisRecorder, FluidMetrics};
 pub use desktop::DesktopApp;
 pub use desktop_interactive::InteractiveApp;
-pub use analysis::{FluidMetrics, AnalysisRecorder};
+pub use export::ImageExporter;
+pub use fluid_final::FluidFinal;
+pub use fluid_interactive::InteractiveFluid;
+pub use fluid_proper::FluidSolver;
+pub use fluid_working::WorkingFluid;
+pub use render::Renderer;

@@ -1,4 +1,4 @@
-use itsliquid::{InteractiveFluid, FluidFinal};
+use itsliquid::{FluidFinal, InteractiveFluid};
 
 #[test]
 fn test_interactive_fluid_creation() {
@@ -22,7 +22,7 @@ fn test_fluid_final_creation() {
 fn test_dye_addition() {
     let mut fluid = InteractiveFluid::new(10, 10);
     fluid.add_dye(5, 5, (1.0, 0.5, 0.25));
-    
+
     let idx = 5 * 10 + 5;
     assert!(fluid.dye_r[idx] > 0.0);
     assert!(fluid.dye_g[idx] > 0.0);
@@ -33,10 +33,10 @@ fn test_dye_addition() {
 fn test_fluid_step() {
     let mut fluid = InteractiveFluid::new(10, 10);
     fluid.add_dye(5, 5, (1.0, 0.0, 0.0));
-    
+
     // Just verify that step runs without panicking
     fluid.step();
-    
+
     // Basic sanity check - fluid should still be valid
     assert_eq!(fluid.width, 10);
     assert_eq!(fluid.height, 10);

@@ -1,11 +1,13 @@
 //! Functional GPU fluid simulation with actual computation
 
-use wgpu::{Device, Queue, Texture, TextureView, BindGroup, BindGroupLayout, ComputePipeline, Buffer};
-use wgpu::util::DeviceExt;
-use glam::Vec2;
 use bytemuck::{Pod, Zeroable};
+use glam::Vec2;
 use std::num::NonZeroU64;
 use tokio::sync::oneshot;
+use wgpu::util::DeviceExt;
+use wgpu::{
+    BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, Queue, Texture, TextureView,
+};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -23,20 +25,20 @@ pub struct FunctionalGPUFluid {
     queue: Queue,
     width: u32,
     height: u32,
-    
+
     // Simulation parameters buffer
     params_buffer: Buffer,
-    
+
     // Textures for simulation state
     velocity_texture: Texture,
     velocity_view: TextureView,
     dye_texture: Texture,
     dye_view: TextureView,
-    
+
     // Compute pipelines
     advect_pipeline: ComputePipeline,
     diffuse_pipeline: ComputePipeline,
-    
+
     // Bind groups
     bind_group: BindGroup,
 }
@@ -44,7 +46,7 @@ pub struct FunctionalGPUFluid {
 impl FunctionalGPUFluid {
     pub async fn new(width: u32, height: u32) -> Result<Self, Box<dyn std::error::Error>> {
         let instance = wgpu::Instance::default();
-        
+
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -53,7 +55,7 @@ impl FunctionalGPUFluid {
             })
             .await
             .ok_or("No GPU adapter found")?;
-        
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -64,7 +66,7 @@ impl FunctionalGPUFluid {
                 None,
             )
             .await?;
-        
+
         // Create simulation parameters buffer
         let params = SimulationParams {
             width,
@@ -74,20 +76,20 @@ impl FunctionalGPUFluid {
             diffusion: 0.0001,
             _padding: [0, 0],
         };
-        
+
         let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Simulation Parameters"),
             contents: bytemuck::cast_slice(&[params]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        
+
         // Create textures
         let texture_size = wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         };
-        
+
         let velocity_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Velocity Texture"),
             size: texture_size,
@@ -98,9 +100,9 @@ impl FunctionalGPUFluid {
             usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        
+
         let velocity_view = velocity_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        
+
         let dye_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Dye Texture"),
             size: texture_size,
@@ -108,12 +110,14 @@ impl FunctionalGPUFluid {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba32Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        
+
         let dye_view = dye_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        
+
         // Create shader with actual fluid simulation
         let shader_source = r"
             struct SimulationParams {
@@ -266,12 +270,12 @@ impl FunctionalGPUFluid {
             
 
         ";
-        
+
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Functional Fluid Shader"),
             source: wgpu::ShaderSource::Wgsl(shader_source.into()),
         });
-        
+
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Fluid Bind Group Layout"),
@@ -282,7 +286,10 @@ impl FunctionalGPUFluid {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: Some(NonZeroU64::new(std::mem::size_of::<SimulationParams>() as u64).unwrap()),
+                        min_binding_size: Some(
+                            NonZeroU64::new(std::mem::size_of::<SimulationParams>() as u64)
+                                .unwrap(),
+                        ),
                     },
                     count: None,
                 },
@@ -308,7 +315,7 @@ impl FunctionalGPUFluid {
                 },
             ],
         });
-        
+
         // Create bind group
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Fluid Bind Group"),
@@ -328,14 +335,14 @@ impl FunctionalGPUFluid {
                 },
             ],
         });
-        
+
         // Create compute pipelines
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Fluid Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
-        
+
         let diffuse_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Diffusion Pipeline"),
             layout: Some(&pipeline_layout),
@@ -343,7 +350,7 @@ impl FunctionalGPUFluid {
             entry_point: "diffuse",
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
-        
+
         let advect_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Advection Pipeline"),
             layout: Some(&pipeline_layout),
@@ -351,7 +358,7 @@ impl FunctionalGPUFluid {
             entry_point: "advect",
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
-        
+
         Ok(Self {
             device,
             queue,
@@ -367,57 +374,63 @@ impl FunctionalGPUFluid {
             bind_group,
         })
     }
-    
+
     pub fn step(&mut self) {
         // Run diffusion
         self.run_compute_pass(&self.diffuse_pipeline);
-        
+
         // Run advection
         self.run_compute_pass(&self.advect_pipeline);
     }
-    
+
     fn run_compute_pass(&self, pipeline: &ComputePipeline) {
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Fluid Compute Encoder"),
-        });
-        
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Fluid Compute Encoder"),
+            });
+
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Fluid Compute Pass"),
             timestamp_writes: None,
         });
-        
+
         compute_pass.set_pipeline(pipeline);
         compute_pass.set_bind_group(0, &self.bind_group, &[]);
-        
+
         let workgroup_size = 8;
         let workgroup_count_x = (self.width + workgroup_size - 1) / workgroup_size;
         let workgroup_count_y = (self.height + workgroup_size - 1) / workgroup_size;
-        
+
         compute_pass.dispatch_workgroups(workgroup_count_x, workgroup_count_y, 1);
-        
+
         drop(compute_pass);
-        
+
         self.queue.submit(std::iter::once(encoder.finish()));
     }
-    
+
     pub fn gpu_add_dye(&mut self, x: u32, y: u32, color: (f32, f32, f32)) {
         // Create a staging buffer with the dye data
         let dye_data = vec![color.0, color.1, color.2, 1.0];
-        
-        let staging_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Dye Staging Buffer"),
-            contents: bytemuck::cast_slice(&dye_data),
-            usage: wgpu::BufferUsages::COPY_SRC,
-        });
-        
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Add Dye Encoder"),
-        });
-        
+
+        let staging_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Dye Staging Buffer"),
+                contents: bytemuck::cast_slice(&dye_data),
+                usage: wgpu::BufferUsages::COPY_SRC,
+            });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Add Dye Encoder"),
+            });
+
         // Align bytes per row to 256 bytes
         let bytes_per_pixel = 4 * std::mem::size_of::<f32>() as u32;
         let aligned_bytes_per_row = ((bytes_per_pixel + 255) / 256) * 256;
-        
+
         encoder.copy_buffer_to_texture(
             wgpu::ImageCopyBuffer {
                 buffer: &staging_buffer,
@@ -439,28 +452,32 @@ impl FunctionalGPUFluid {
                 depth_or_array_layers: 1,
             },
         );
-        
+
         self.queue.submit(std::iter::once(encoder.finish()));
     }
-    
+
     pub fn gpu_add_force(&mut self, x: u32, y: u32, force: Vec2) {
         // Create a staging buffer with the force data
         let force_data = vec![force.x, force.y, 0.0, 1.0];
-        
-        let staging_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Force Staging Buffer"),
-            contents: bytemuck::cast_slice(&force_data),
-            usage: wgpu::BufferUsages::COPY_SRC,
-        });
-        
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Add Force Encoder"),
-        });
-        
+
+        let staging_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Force Staging Buffer"),
+                contents: bytemuck::cast_slice(&force_data),
+                usage: wgpu::BufferUsages::COPY_SRC,
+            });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Add Force Encoder"),
+            });
+
         // Align bytes per row to 256 bytes
         let bytes_per_pixel = 4 * std::mem::size_of::<f32>() as u32;
         let aligned_bytes_per_row = ((bytes_per_pixel + 255) / 256) * 256;
-        
+
         encoder.copy_buffer_to_texture(
             wgpu::ImageCopyBuffer {
                 buffer: &staging_buffer,
@@ -482,31 +499,38 @@ impl FunctionalGPUFluid {
                 depth_or_array_layers: 1,
             },
         );
-        
+
         self.queue.submit(std::iter::once(encoder.finish()));
     }
-    
-    pub fn gpu_width(&self) -> u32 { self.width }
-    pub fn gpu_height(&self) -> u32 { self.height }
-    
+
+    pub fn gpu_width(&self) -> u32 {
+        self.width
+    }
+    pub fn gpu_height(&self) -> u32 {
+        self.height
+    }
+
     pub fn get_dye_texture_view(&self) -> &TextureView {
         &self.dye_view
     }
-    
+
     pub async fn read_dye_data(&self) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
-        let buffer_size = (self.width as u64 * self.height as u64 * 4 * std::mem::size_of::<f32>() as u64) as u64;
-        
+        let buffer_size =
+            (self.width as u64 * self.height as u64 * 4 * std::mem::size_of::<f32>() as u64) as u64;
+
         let read_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Dye Read Buffer"),
             size: buffer_size,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
-        
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Read Dye Encoder"),
-        });
-        
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Read Dye Encoder"),
+            });
+
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
                 texture: &self.dye_texture,
@@ -528,22 +552,22 @@ impl FunctionalGPUFluid {
                 depth_or_array_layers: 1,
             },
         );
-        
+
         self.queue.submit(std::iter::once(encoder.finish()));
-        
+
         let buffer_slice = read_buffer.slice(..);
         let (sender, receiver) = oneshot::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = sender.send(result);
         });
-        
+
         self.device.poll(wgpu::Maintain::Wait);
-        
+
         receiver.await??;
-        
+
         let data = buffer_slice.get_mapped_range();
         let dye_data: &[f32] = bytemuck::cast_slice(&data);
-        
+
         Ok(dye_data.to_vec())
     }
 }
@@ -552,15 +576,19 @@ impl crate::FluidSimulation for FunctionalGPUFluid {
     fn step(&mut self) {
         self.step()
     }
-    
+
     fn add_force(&mut self, x: usize, y: usize, force: glam::Vec2) {
         self.gpu_add_force(x as u32, y as u32, force)
     }
-    
+
     fn add_dye(&mut self, x: usize, y: usize, color: (f32, f32, f32)) {
         self.gpu_add_dye(x as u32, y as u32, color)
     }
-    
-    fn width(&self) -> usize { self.gpu_width() as usize }
-    fn height(&self) -> usize { self.gpu_height() as usize }
+
+    fn width(&self) -> usize {
+        self.gpu_width() as usize
+    }
+    fn height(&self) -> usize {
+        self.gpu_height() as usize
+    }
 }
