@@ -11,7 +11,28 @@ pub mod desktop;
 pub mod desktop_interactive;
 pub mod analysis;
 
-pub use fluid_simple::FluidSimulation;
+#[cfg(feature = "gpu")]
+pub mod gpu_minimal;
+
+#[cfg(feature = "gpu")]
+pub mod desktop_gpu;
+
+// Unified fluid simulation trait
+pub trait FluidSimulation {
+    fn step(&mut self);
+    fn add_force(&mut self, x: usize, y: usize, force: glam::Vec2);
+    fn add_dye(&mut self, x: usize, y: usize, color: (f32, f32, f32));
+    fn width(&self) -> usize;
+    fn height(&self) -> usize;
+}
+
+// Feature-based implementation selection
+#[cfg(feature = "cpu")]
+pub type DefaultFluid = fluid_interactive::InteractiveFluid;
+
+#[cfg(all(feature = "gpu", not(feature = "cpu")))]
+pub type DefaultFluid = gpu_minimal::MinimalGPUFluid;
+
 pub use fluid_proper::FluidSolver;
 pub use fluid_working::WorkingFluid;
 pub use fluid_final::FluidFinal;

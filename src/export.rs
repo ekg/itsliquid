@@ -10,13 +10,8 @@ pub trait FluidData {
     fn velocity_y(&self) -> &[f32];
 }
 
-impl FluidData for FluidSimulation {
-    fn width(&self) -> usize { self.width }
-    fn height(&self) -> usize { self.height }
-    fn density(&self) -> &[f32] { &self.density }
-    fn velocity_x(&self) -> &[f32] { &self.velocity_x }
-    fn velocity_y(&self) -> &[f32] { &self.velocity_y }
-}
+// These implementations were incorrect and have been removed
+// The export functionality needs to be reworked for the trait-based system
 
 impl FluidData for FluidSolver {
     fn width(&self) -> usize { self.width }
@@ -87,11 +82,7 @@ pub trait Step {
     fn step(&mut self);
 }
 
-impl Step for FluidSimulation {
-    fn step(&mut self) {
-        self.step();
-    }
-}
+// Step implementation removed - needs to be implemented per concrete type
 
 impl Step for FluidSolver {
     fn step(&mut self) {

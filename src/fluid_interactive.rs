@@ -1,4 +1,5 @@
 use glam::Vec2;
+use crate::FluidSimulation;
 
 #[derive(Debug, Clone)]
 pub struct InteractiveFluid {
@@ -19,6 +20,28 @@ pub struct InteractiveFluid {
     pub dt: f32,
     pub viscosity: f32,
     pub dye_diffusion: f32,
+}
+
+impl FluidSimulation for InteractiveFluid {
+    fn step(&mut self) {
+        self.step()
+    }
+    
+    fn add_force(&mut self, x: usize, y: usize, force: glam::Vec2) {
+        self.add_force(x, y, force, 3.0)
+    }
+    
+    fn add_dye(&mut self, x: usize, y: usize, color: (f32, f32, f32)) {
+        self.add_dye(x, y, color)
+    }
+    
+    fn width(&self) -> usize {
+        self.width
+    }
+    
+    fn height(&self) -> usize {
+        self.height
+    }
 }
 
 impl InteractiveFluid {
