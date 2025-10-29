@@ -45,3 +45,6 @@ pub use fluid_interactive::InteractiveFluid;
 pub use fluid_proper::FluidSolver;
 pub use fluid_working::WorkingFluid;
 pub use render::Renderer;
+
+#[cfg(feature = "gpu")]
+pub use desktop_gpu::GPUInteractiveApp;

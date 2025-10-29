@@ -32,12 +32,23 @@ pub struct FunctionalGPUFluid {
     // Textures for simulation state
     velocity_texture: Texture,
     velocity_view: TextureView,
+    velocity_prev_texture: Texture,
+    velocity_prev_view: TextureView,
     dye_texture: Texture,
     dye_view: TextureView,
+    dye_prev_texture: Texture,
+    dye_prev_view: TextureView,
 
     // Compute pipelines
-    advect_pipeline: ComputePipeline,
-    diffuse_pipeline: ComputePipeline,
+    diffuse_velocity_pipeline: ComputePipeline,
+    diffuse_dye_pipeline: ComputePipeline,
+    advect_velocity_pipeline: ComputePipeline,
+    advect_dye_pipeline: ComputePipeline,
+    set_velocity_boundaries_pipeline: ComputePipeline,
+    set_dye_boundaries_pipeline: ComputePipeline,
+    project_velocity_pipeline: ComputePipeline,
+    copy_velocity_to_prev_pipeline: ComputePipeline,
+    copy_dye_to_prev_pipeline: ComputePipeline,
 
     // Bind groups
     bind_group: BindGroup,
@@ -71,9 +82,9 @@ impl FunctionalGPUFluid {
         let params = SimulationParams {
             width,
             height,
-            dt: 0.1,
-            viscosity: 0.001,
-            diffusion: 0.0001,
+            dt: 1.0,  // Increased for more visible movement
+            viscosity: 0.0001,  // Reduced to preserve velocity better
+            diffusion: 0.00001,  // Reduced to preserve dye better
             _padding: [0, 0],
         };
 
@@ -103,6 +114,19 @@ impl FunctionalGPUFluid {
 
         let velocity_view = velocity_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+        let velocity_prev_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Velocity Prev Texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let velocity_prev_view = velocity_prev_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         let dye_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Dye Texture"),
             size: texture_size,
@@ -118,8 +142,108 @@ impl FunctionalGPUFluid {
 
         let dye_view = dye_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Create shader with actual fluid simulation
+        let dye_prev_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Dye Prev Texture"),
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let dye_prev_view = dye_prev_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Initialize all textures to zero
+        let zero_data = vec![0.0f32; (width * height * 4) as usize];
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &velocity_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&zero_data),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4 * std::mem::size_of::<f32>() as u32),
+                rows_per_image: Some(height),
+            },
+            texture_size,
+        );
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &velocity_prev_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&zero_data),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4 * std::mem::size_of::<f32>() as u32),
+                rows_per_image: Some(height),
+            },
+            texture_size,
+        );
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &dye_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&zero_data),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4 * std::mem::size_of::<f32>() as u32),
+                rows_per_image: Some(height),
+            },
+            texture_size,
+        );
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &dye_prev_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&zero_data),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4 * std::mem::size_of::<f32>() as u32),
+                rows_per_image: Some(height),
+            },
+            texture_size,
+        );
+
+        // Create complete fluid simulation shader matching CPU algorithm
         let shader_source = r"
+            // Helper functions
+            fn floor(x: f32) -> f32 {
+                return f32(i32(x));
+            }
+            
+            fn max(a: f32, b: f32) -> f32 {
+                return select(b, a, a >= b);
+            }
+            
+            fn min(a: f32, b: f32) -> f32 {
+                return select(a, b, a <= b);
+            }
+            
+            fn select(a: f32, b: f32, condition: bool) -> f32 {
+                if (condition) {
+                    return a;
+                } else {
+                    return b;
+                }
+            }
             struct SimulationParams {
                 width: u32,
                 height: u32,
@@ -130,15 +254,26 @@ impl FunctionalGPUFluid {
             
             @group(0) @binding(0)
             var<uniform> params: SimulationParams;
-            
+
             @group(0) @binding(1)
             var velocity_texture: texture_storage_2d<rgba32float, read_write>;
-            
+
             @group(0) @binding(2)
+            var velocity_prev_texture: texture_storage_2d<rgba32float, read_write>;
+
+            @group(0) @binding(3)
             var dye_texture: texture_storage_2d<rgba32float, read_write>;
+
+            @group(0) @binding(4)
+            var dye_prev_texture: texture_storage_2d<rgba32float, read_write>;
             
             fn sample_velocity(coord: vec2<u32>) -> vec2<f32> {
                 let texel = textureLoad(velocity_texture, coord);
+                return vec2<f32>(texel.x, texel.y);
+            }
+            
+            fn sample_velocity_prev(coord: vec2<u32>) -> vec2<f32> {
+                let texel = textureLoad(velocity_prev_texture, coord);
                 return vec2<f32>(texel.x, texel.y);
             }
             
@@ -146,31 +281,23 @@ impl FunctionalGPUFluid {
                 let texel = textureLoad(dye_texture, coord);
                 return vec3<f32>(texel.x, texel.y, texel.z);
             }
-            
+
+            fn sample_dye_prev(coord: vec2<u32>) -> vec3<f32> {
+                let texel = textureLoad(dye_prev_texture, coord);
+                return vec3<f32>(texel.x, texel.y, texel.z);
+            }
+
             fn set_velocity(coord: vec2<u32>, velocity: vec2<f32>) {
                 textureStore(velocity_texture, coord, vec4<f32>(velocity.x, velocity.y, 0.0, 1.0));
             }
-            
+
             fn set_dye(coord: vec2<u32>, dye: vec3<f32>) {
                 textureStore(dye_texture, coord, vec4<f32>(dye.x, dye.y, dye.z, 1.0));
             }
             
-            // Helper functions for interpolation
-            fn mix_vec2(a: vec2<f32>, b: vec2<f32>, t: f32) -> vec2<f32> {
-                return a + (b - a) * t;
-            }
-            
-            fn mix_vec3(a: vec3<f32>, b: vec3<f32>, t: f32) -> vec3<f32> {
-                return a + (b - a) * t;
-            }
-            
-            fn floor(x: f32) -> f32 {
-                return f32(i32(x));
-            }
-            
-            // Advanced diffusion shader with proper boundary handling
+            // Velocity diffusion matching CPU implementation
             @compute @workgroup_size(8, 8)
-            fn diffuse(@builtin(global_invocation_id) global_id: vec3<u32>) {
+            fn diffuse_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (global_id.x >= params.width || global_id.y >= params.height) {
                     return;
                 }
@@ -179,44 +306,58 @@ impl FunctionalGPUFluid {
                 let x = i32(coord.x);
                 let y = i32(coord.y);
                 
-                // Boundary conditions
+                // Skip boundaries (handled separately)
                 if (x <= 0 || x >= i32(params.width - 1) || y <= 0 || y >= i32(params.height - 1)) {
-                    // Set boundary velocity to zero
-                    set_velocity(coord, vec2<f32>(0.0));
-                    // Let dye diffuse naturally at boundaries
                     return;
                 }
                 
-                // Sample current state
-                let current_velocity = sample_velocity(coord);
-                let current_dye = sample_dye(coord);
+                // Sample neighbors
+                let left = sample_velocity_prev(vec2<u32>(u32(x - 1), u32(y)));
+                let right = sample_velocity_prev(vec2<u32>(u32(x + 1), u32(y)));
+                let up = sample_velocity_prev(vec2<u32>(u32(x), u32(y - 1)));
+                let down = sample_velocity_prev(vec2<u32>(u32(x), u32(y + 1)));
                 
-                // Sample neighbors with boundary checks
-                let left = sample_velocity(vec2<u32>(u32(x - 1), u32(y)));
-                let right = sample_velocity(vec2<u32>(u32(x + 1), u32(y)));
-                let up = sample_velocity(vec2<u32>(u32(x), u32(y - 1)));
-                let down = sample_velocity(vec2<u32>(u32(x), u32(y + 1)));
+                // Velocity diffusion with CPU scaling (no width*height factor)
+                let a = params.dt * params.viscosity;
+                let current = sample_velocity_prev(coord);
+                let diffused = (current + a * (left + right + up + down)) / (1.0 + 4.0 * a);
                 
-                // Velocity diffusion with proper scaling
-                let a = params.dt * params.viscosity * f32(params.width * params.height);
-                let diffused_velocity = (current_velocity + a * (left + right + up + down)) / (1.0 + 4.0 * a);
-                
-                // Dye diffusion
-                let dye_left = sample_dye(vec2<u32>(u32(x - 1), u32(y)));
-                let dye_right = sample_dye(vec2<u32>(u32(x + 1), u32(y)));
-                let dye_up = sample_dye(vec2<u32>(u32(x), u32(y - 1)));
-                let dye_down = sample_dye(vec2<u32>(u32(x), u32(y + 1)));
-                
-                let b = params.dt * params.diffusion * f32(params.width * params.height);
-                let diffused_dye = (current_dye + b * (dye_left + dye_right + dye_up + dye_down)) / (1.0 + 4.0 * b);
-                
-                set_velocity(coord, diffused_velocity);
-                set_dye(coord, diffused_dye);
+                set_velocity(coord, diffused);
             }
             
-            // Advanced advection shader with bilinear interpolation
+            // Dye diffusion matching CPU implementation
             @compute @workgroup_size(8, 8)
-            fn advect(@builtin(global_invocation_id) global_id: vec3<u32>) {
+            fn diffuse_dye(@builtin(global_invocation_id) global_id: vec3<u32>) {
+                if (global_id.x >= params.width || global_id.y >= params.height) {
+                    return;
+                }
+
+                let coord = vec2<u32>(global_id.x, global_id.y);
+                let x = i32(coord.x);
+                let y = i32(coord.y);
+
+                // Skip boundaries (handled separately)
+                if (x <= 0 || x >= i32(params.width - 1) || y <= 0 || y >= i32(params.height - 1)) {
+                    return;
+                }
+
+                // Sample neighbors from PREVIOUS dye buffer
+                let dye_left = sample_dye_prev(vec2<u32>(u32(x - 1), u32(y)));
+                let dye_right = sample_dye_prev(vec2<u32>(u32(x + 1), u32(y)));
+                let dye_up = sample_dye_prev(vec2<u32>(u32(x), u32(y - 1)));
+                let dye_down = sample_dye_prev(vec2<u32>(u32(x), u32(y + 1)));
+
+                // Dye diffusion with CPU scaling (no width*height factor)
+                let b = params.dt * params.diffusion;
+                let current = sample_dye_prev(coord);
+                let diffused = (current + b * (dye_left + dye_right + dye_up + dye_down)) / (1.0 + 4.0 * b);
+
+                set_dye(coord, diffused);
+            }
+            
+            // Velocity advection using previous velocity field (like CPU)
+            @compute @workgroup_size(8, 8)
+            fn advect_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (global_id.x >= params.width || global_id.y >= params.height) {
                     return;
                 }
@@ -225,22 +366,23 @@ impl FunctionalGPUFluid {
                 let x = i32(coord.x);
                 let y = i32(coord.y);
                 
-                // Skip boundaries for advection
+                // Skip boundaries
                 if (x <= 0 || x >= i32(params.width - 1) || y <= 0 || y >= i32(params.height - 1)) {
                     return;
                 }
                 
-                let velocity = sample_velocity(coord);
+                // Sample previous velocity (like CPU version)
+                let velocity_prev = sample_velocity_prev(coord);
                 
-                // Backtrace position with proper scaling
-                let src_x = f32(x) - velocity.x * params.dt * f32(params.width);
-                let src_y = f32(y) - velocity.y * params.dt * f32(params.height);
+                // Backtrace position matching CPU scaling (no width*height factor)
+                let src_x = f32(x) - params.dt * velocity_prev.x;
+                let src_y = f32(y) - params.dt * velocity_prev.y;
                 
-                // Clamp to valid range with border
+                // Clamp to valid range with border (same as CPU)
                 let clamped_x = max(0.5, min(src_x, f32(params.width - 1) - 0.5));
                 let clamped_y = max(0.5, min(src_y, f32(params.height - 1) - 0.5));
                 
-                // Bilinear interpolation for better quality
+                // Bilinear interpolation matching CPU
                 let x0 = u32(floor(clamped_x));
                 let x1 = u32(min(f32(params.width - 1), f32(x0) + 1.0));
                 let y0 = u32(floor(clamped_y));
@@ -249,26 +391,170 @@ impl FunctionalGPUFluid {
                 let tx = clamped_x - f32(x0);
                 let ty = clamped_y - f32(y0);
                 
-                // Sample four surrounding texels
-                let v00 = sample_velocity(vec2<u32>(x0, y0));
-                let v10 = sample_velocity(vec2<u32>(x1, y0));
-                let v01 = sample_velocity(vec2<u32>(x0, y1));
-                let v11 = sample_velocity(vec2<u32>(x1, y1));
+                // Advect velocity using previous velocity field (like CPU)
+                let v00 = sample_velocity_prev(vec2<u32>(x0, y0));
+                let v01 = sample_velocity_prev(vec2<u32>(x1, y0));
+                let v10 = sample_velocity_prev(vec2<u32>(x0, y1));
+                let v11 = sample_velocity_prev(vec2<u32>(x1, y1));
                 
-                let d00 = sample_dye(vec2<u32>(x0, y0));
-                let d10 = sample_dye(vec2<u32>(x1, y0));
-                let d01 = sample_dye(vec2<u32>(x0, y1));
-                let d11 = sample_dye(vec2<u32>(x1, y1));
-                
-                // Bilinear interpolation
-                let advected_velocity = mix_vec2(mix_vec2(v00, v10, tx), mix_vec2(v01, v11, tx), ty);
-                let advected_dye = mix_vec3(mix_vec3(d00, d10, tx), mix_vec3(d01, d11, tx), ty);
+                let advected_velocity = (1.0 - tx) * (1.0 - ty) * v00
+                    + tx * (1.0 - ty) * v01
+                    + (1.0 - tx) * ty * v10
+                    + tx * ty * v11;
                 
                 set_velocity(coord, advected_velocity);
+            }
+            
+            // Dye advection using current velocity field (like CPU)
+            @compute @workgroup_size(8, 8)
+            fn advect_dye(@builtin(global_invocation_id) global_id: vec3<u32>) {
+                if (global_id.x >= params.width || global_id.y >= params.height) {
+                    return;
+                }
+
+                let coord = vec2<u32>(global_id.x, global_id.y);
+                let x = i32(coord.x);
+                let y = i32(coord.y);
+
+                // Skip boundaries
+                if (x <= 0 || x >= i32(params.width - 1) || y <= 0 || y >= i32(params.height - 1)) {
+                    return;
+                }
+
+                // Advect dye using current velocity field, reading from PREVIOUS dye buffer
+                let velocity_current = sample_velocity(coord);
+                let src_x = f32(x) - params.dt * velocity_current.x;
+                let src_y = f32(y) - params.dt * velocity_current.y;
+
+                let clamped_x = max(0.5, min(src_x, f32(params.width - 1) - 0.5));
+                let clamped_y = max(0.5, min(src_y, f32(params.height - 1) - 0.5));
+
+                let x0 = u32(floor(clamped_x));
+                let x1 = u32(min(f32(params.width - 1), f32(x0) + 1.0));
+                let y0 = u32(floor(clamped_y));
+                let y1 = u32(min(f32(params.height - 1), f32(y0) + 1.0));
+
+                let tx = clamped_x - f32(x0);
+                let ty = clamped_y - f32(y0);
+
+                // Sample from PREVIOUS dye buffer to avoid race conditions
+                let d00 = sample_dye_prev(vec2<u32>(x0, y0));
+                let d01 = sample_dye_prev(vec2<u32>(x1, y0));
+                let d10 = sample_dye_prev(vec2<u32>(x0, y1));
+                let d11 = sample_dye_prev(vec2<u32>(x1, y1));
+
+                let advected_dye = (1.0 - tx) * (1.0 - ty) * d00
+                    + tx * (1.0 - ty) * d01
+                    + (1.0 - tx) * ty * d10
+                    + tx * ty * d11;
+
                 set_dye(coord, advected_dye);
             }
             
+            // Boundary conditions for velocity
+            @compute @workgroup_size(8, 8)
+            fn set_velocity_boundaries(@builtin(global_invocation_id) global_id: vec3<u32>) {
+                if (global_id.x >= params.width || global_id.y >= params.height) {
+                    return;
+                }
+                
+                let coord = vec2<u32>(global_id.x, global_id.y);
+                let x = i32(coord.x);
+                let y = i32(coord.y);
+                
+                // Set boundary velocity to zero (like CPU)
+                if (x == 0 || x == i32(params.width - 1) || y == 0 || y == i32(params.height - 1)) {
+                    set_velocity(coord, vec2<f32>(0.0));
+                }
+            }
+            
+            // Boundary conditions for dye - read from previous buffer to avoid race conditions
+            @compute @workgroup_size(8, 8)
+            fn set_dye_boundaries(@builtin(global_invocation_id) global_id: vec3<u32>) {
+                if (global_id.x >= params.width || global_id.y >= params.height) {
+                    return;
+                }
 
+                let coord = vec2<u32>(global_id.x, global_id.y);
+                let x = i32(coord.x);
+                let y = i32(coord.y);
+
+                // Set dye boundaries - read from dye (current after diffusion/advection)
+                if (x == 0) {
+                    let right = sample_dye(vec2<u32>(1, u32(y)));
+                    set_dye(coord, right);
+                } else if (x == i32(params.width - 1)) {
+                    let left = sample_dye(vec2<u32>(u32(params.width - 2), u32(y)));
+                    set_dye(coord, left);
+                } else if (y == 0) {
+                    let down = sample_dye(vec2<u32>(u32(x), 1));
+                    set_dye(coord, down);
+                } else if (y == i32(params.height - 1)) {
+                    let up = sample_dye(vec2<u32>(u32(x), u32(params.height - 2)));
+                    set_dye(coord, up);
+                }
+            }
+            
+            // Simple velocity projection (basic divergence-free enforcement)
+            @compute @workgroup_size(8, 8)
+            fn project_velocity(@builtin(global_invocation_id) global_id: vec3<u32>) {
+                if (global_id.x >= params.width || global_id.y >= params.height) {
+                    return;
+                }
+                
+                let coord = vec2<u32>(global_id.x, global_id.y);
+                let x = i32(coord.x);
+                let y = i32(coord.y);
+                
+                // Skip boundaries
+                if (x <= 0 || x >= i32(params.width - 1) || y <= 0 || y >= i32(params.height - 1)) {
+                    return;
+                }
+                
+                let h = 1.0 / f32(params.width);
+                
+                // Calculate divergence (like CPU)
+                let vel_left = sample_velocity(vec2<u32>(u32(x - 1), u32(y)));
+                let vel_right = sample_velocity(vec2<u32>(u32(x + 1), u32(y)));
+                let vel_up = sample_velocity(vec2<u32>(u32(x), u32(y - 1)));
+                let vel_down = sample_velocity(vec2<u32>(u32(x), u32(y + 1)));
+                
+                let divergence = -0.5 * h * (vel_right.x - vel_left.x + vel_down.y - vel_up.y);
+                
+                // Simple pressure correction (single iteration for now)
+                let pressure_correction = divergence * 0.25;
+                
+                // Apply pressure gradient correction
+                let current_vel = sample_velocity(coord);
+                let new_vel_x = current_vel.x - 0.5 * pressure_correction / h;
+                let new_vel_y = current_vel.y - 0.5 * pressure_correction / h;
+                
+                set_velocity(coord, vec2<f32>(new_vel_x, new_vel_y));
+            }
+            
+            // Copy velocity to velocity_prev (like CPU's copy_from_slice)
+            @compute @workgroup_size(8, 8)
+            fn copy_velocity_to_prev(@builtin(global_invocation_id) global_id: vec3<u32>) {
+                if (global_id.x >= params.width || global_id.y >= params.height) {
+                    return;
+                }
+
+                let coord = vec2<u32>(global_id.x, global_id.y);
+                let velocity = sample_velocity(coord);
+                textureStore(velocity_prev_texture, coord, vec4<f32>(velocity.x, velocity.y, 0.0, 1.0));
+            }
+
+            // Copy dye to dye_prev (for double buffering)
+            @compute @workgroup_size(8, 8)
+            fn copy_dye_to_prev(@builtin(global_invocation_id) global_id: vec3<u32>) {
+                if (global_id.x >= params.width || global_id.y >= params.height) {
+                    return;
+                }
+
+                let coord = vec2<u32>(global_id.x, global_id.y);
+                let dye = sample_dye(coord);
+                textureStore(dye_prev_texture, coord, vec4<f32>(dye.x, dye.y, dye.z, 1.0));
+            }
         ";
 
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -313,6 +599,26 @@ impl FunctionalGPUFluid {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::ReadWrite,
+                        format: wgpu::TextureFormat::Rgba32Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::ReadWrite,
+                        format: wgpu::TextureFormat::Rgba32Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -331,7 +637,15 @@ impl FunctionalGPUFluid {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&velocity_prev_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
                     resource: wgpu::BindingResource::TextureView(&dye_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&dye_prev_view),
                 },
             ],
         });
@@ -343,19 +657,75 @@ impl FunctionalGPUFluid {
             push_constant_ranges: &[],
         });
 
-        let diffuse_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Diffusion Pipeline"),
+        let diffuse_velocity_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Diffuse Velocity Pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader_module,
-            entry_point: "diffuse",
+            entry_point: "diffuse_velocity",
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
-        let advect_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Advection Pipeline"),
+        let diffuse_dye_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Diffuse Dye Pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader_module,
-            entry_point: "advect",
+            entry_point: "diffuse_dye",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let advect_velocity_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Advect Velocity Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader_module,
+            entry_point: "advect_velocity",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let advect_dye_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Advect Dye Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader_module,
+            entry_point: "advect_dye",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let set_velocity_boundaries_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Set Velocity Boundaries Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader_module,
+            entry_point: "set_velocity_boundaries",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let set_dye_boundaries_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Set Dye Boundaries Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader_module,
+            entry_point: "set_dye_boundaries",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let project_velocity_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Project Velocity Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader_module,
+            entry_point: "project_velocity",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let copy_velocity_to_prev_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Copy Velocity to Prev Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader_module,
+            entry_point: "copy_velocity_to_prev",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
+
+        let copy_dye_to_prev_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Copy Dye to Prev Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader_module,
+            entry_point: "copy_dye_to_prev",
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
@@ -367,20 +737,40 @@ impl FunctionalGPUFluid {
             params_buffer,
             velocity_texture,
             velocity_view,
+            velocity_prev_texture,
+            velocity_prev_view,
             dye_texture,
             dye_view,
-            advect_pipeline,
-            diffuse_pipeline,
+            dye_prev_texture,
+            dye_prev_view,
+            diffuse_velocity_pipeline,
+            diffuse_dye_pipeline,
+            advect_velocity_pipeline,
+            advect_dye_pipeline,
+            set_velocity_boundaries_pipeline,
+            set_dye_boundaries_pipeline,
+            project_velocity_pipeline,
+            copy_velocity_to_prev_pipeline,
+            copy_dye_to_prev_pipeline,
             bind_group,
         })
     }
 
     pub fn step(&mut self) {
-        // Run diffusion
-        self.run_compute_pass(&self.diffuse_pipeline);
+        // Simplified step - no velocity processing, just dye diffusion
+        // This should at least preserve the dye without movement
 
-        // Run advection
-        self.run_compute_pass(&self.advect_pipeline);
+        // Copy dye to dye_prev for double buffering
+        self.run_compute_pass(&self.copy_dye_to_prev_pipeline);
+
+        // Diffuse dye (2 iterations)
+        for _ in 0..2 {
+            self.run_compute_pass(&self.diffuse_dye_pipeline);
+            self.run_compute_pass(&self.copy_dye_to_prev_pipeline);
+        }
+
+        // Ensure all GPU operations complete
+        self.device.poll(wgpu::Maintain::Wait);
     }
 
     fn run_compute_pass(&self, pipeline: &ComputePipeline) {
@@ -410,42 +800,22 @@ impl FunctionalGPUFluid {
     }
 
     pub fn gpu_add_dye(&mut self, x: u32, y: u32, color: (f32, f32, f32)) {
-        // Create a staging buffer with the dye data
+        // Write directly to the texture using queue.write_texture instead of buffer copy
         let dye_data = vec![color.0, color.1, color.2, 1.0];
 
-        let staging_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Dye Staging Buffer"),
-                contents: bytemuck::cast_slice(&dye_data),
-                usage: wgpu::BufferUsages::COPY_SRC,
-            });
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Add Dye Encoder"),
-            });
-
-        // Align bytes per row to 256 bytes
-        let bytes_per_pixel = 4 * std::mem::size_of::<f32>() as u32;
-        let aligned_bytes_per_row = ((bytes_per_pixel + 255) / 256) * 256;
-
-        encoder.copy_buffer_to_texture(
-            wgpu::ImageCopyBuffer {
-                buffer: &staging_buffer,
-                layout: wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(aligned_bytes_per_row),
-                    rows_per_image: Some(1),
-                },
-            },
+        self.queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &self.dye_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d { x, y, z: 0 },
                 aspect: wgpu::TextureAspect::All,
             },
+            bytemuck::cast_slice(&dye_data),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * std::mem::size_of::<f32>() as u32),
+                rows_per_image: Some(1),
+            },
             wgpu::Extent3d {
                 width: 1,
                 height: 1,
@@ -453,46 +823,27 @@ impl FunctionalGPUFluid {
             },
         );
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        // Ensure GPU operations complete
+        self.device.poll(wgpu::Maintain::Wait);
     }
 
     pub fn gpu_add_force(&mut self, x: u32, y: u32, force: Vec2) {
-        // Create a staging buffer with the force data
+        // Write directly to the texture using queue.write_texture
         let force_data = vec![force.x, force.y, 0.0, 1.0];
 
-        let staging_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Force Staging Buffer"),
-                contents: bytemuck::cast_slice(&force_data),
-                usage: wgpu::BufferUsages::COPY_SRC,
-            });
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Add Force Encoder"),
-            });
-
-        // Align bytes per row to 256 bytes
-        let bytes_per_pixel = 4 * std::mem::size_of::<f32>() as u32;
-        let aligned_bytes_per_row = ((bytes_per_pixel + 255) / 256) * 256;
-
-        encoder.copy_buffer_to_texture(
-            wgpu::ImageCopyBuffer {
-                buffer: &staging_buffer,
-                layout: wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(aligned_bytes_per_row),
-                    rows_per_image: Some(1),
-                },
-            },
+        self.queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &self.velocity_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d { x, y, z: 0 },
                 aspect: wgpu::TextureAspect::All,
             },
+            bytemuck::cast_slice(&force_data),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * std::mem::size_of::<f32>() as u32),
+                rows_per_image: Some(1),
+            },
             wgpu::Extent3d {
                 width: 1,
                 height: 1,
@@ -500,7 +851,8 @@ impl FunctionalGPUFluid {
             },
         );
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        // Ensure GPU operations complete
+        self.device.poll(wgpu::Maintain::Wait);
     }
 
     pub fn gpu_width(&self) -> u32 {
@@ -515,8 +867,14 @@ impl FunctionalGPUFluid {
     }
 
     pub async fn read_dye_data(&self) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
-        let buffer_size =
-            (self.width as u64 * self.height as u64 * 4 * std::mem::size_of::<f32>() as u64) as u64;
+        let bytes_per_pixel = 4 * std::mem::size_of::<f32>();
+        let bytes_per_row_unpadded = self.width as u64 * bytes_per_pixel as u64;
+        
+        // Align bytes per row to 256 bytes (WGSL requirement)
+        let align = 256;
+        let bytes_per_row = ((bytes_per_row_unpadded + align - 1) / align) * align;
+        
+        let buffer_size = bytes_per_row * self.height as u64;
 
         let read_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Dye Read Buffer"),
@@ -542,7 +900,7 @@ impl FunctionalGPUFluid {
                 buffer: &read_buffer,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(self.width * 4 * std::mem::size_of::<f32>() as u32),
+                    bytes_per_row: Some(bytes_per_row as u32),
                     rows_per_image: Some(self.height),
                 },
             },
@@ -566,9 +924,25 @@ impl FunctionalGPUFluid {
         receiver.await??;
 
         let data = buffer_slice.get_mapped_range();
-        let dye_data: &[f32] = bytemuck::cast_slice(&data);
+        let all_data: &[f32] = bytemuck::cast_slice(&data);
+        
+        // Extract actual data skipping padding
+        let mut dye_data = Vec::with_capacity((self.width * self.height * 4) as usize);
+        let pixels_per_row = self.width as usize;
+        let floats_per_pixel = 4;
+        let floats_per_row_unpadded = pixels_per_row * floats_per_pixel;
+        let floats_per_row_padded = (bytes_per_row as usize) / std::mem::size_of::<f32>();
+        
+        for row in 0..self.height as usize {
+            let row_start = row * floats_per_row_padded;
+            let row_end = row_start + floats_per_row_unpadded;
+            
+            if row_end <= all_data.len() {
+                dye_data.extend_from_slice(&all_data[row_start..row_end]);
+            }
+        }
 
-        Ok(dye_data.to_vec())
+        Ok(dye_data)
     }
 }
 

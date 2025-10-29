@@ -1,4 +1,4 @@
-# Liquid - Interactive Fluid Simulation
+# itsliquid - Interactive Fluid Simulation
 
 A real-time fluid simulation engine built in Rust with interactive mouse controls and colorful dye visualization. Experience the beauty of fluid dynamics with intuitive controls and realistic physics.
 
@@ -27,8 +27,8 @@ A real-time fluid simulation engine built in Rust with interactive mouse control
 ### Installation
 
 ```bash
-git clone https://github.com/ekg/liquid.git
-cd liquid
+git clone https://github.com/ekg/itsliquid.git
+cd itsliquid
 cargo run
 ```
 

@@ -19,9 +19,13 @@ pub struct GPUInteractiveApp {
 }
 
 impl GPUInteractiveApp {
-    pub async fn new(width: usize, height: usize) -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(Self {
-            simulation: FunctionalGPUFluid::new(width as u32, height as u32).await?,
+    pub fn new(width: usize, height: usize) -> Self {
+        // Use tokio runtime to block on async initialization
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let simulation = rt.block_on(FunctionalGPUFluid::new(width as u32, height as u32)).unwrap();
+        
+        Self {
+            simulation,
             paused: false,
             frame_count: 0,
             cell_size: 4.0,
@@ -40,7 +44,7 @@ impl GPUInteractiveApp {
             resolution_scale: 1,
             base_width: width,
             base_height: height,
-        })
+        }
     }
 
     fn change_resolution(&mut self, scale: usize) {
@@ -49,14 +53,15 @@ impl GPUInteractiveApp {
             let new_width = self.base_width * scale;
             let new_height = self.base_height * scale;
 
-            // Note: GPU simulation recreation would be async
-            // For now, we'll keep the same simulation
-            // In a real implementation, we'd need to handle async recreation
+            // Recreate GPU simulation with new resolution
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            self.simulation = rt.block_on(FunctionalGPUFluid::new(new_width as u32, new_height as u32)).unwrap();
 
             // Reset simulation state
             self.mouse_dragging = false;
             self.mouse_start_pos = None;
             self.mouse_current_pos = None;
+            self.frame_count = 0;
         }
     }
 }
@@ -241,38 +246,64 @@ impl eframe::App for GPUInteractiveApp {
             // Render GPU texture to screen
             let painter = ui.painter();
 
-            // Create a simple visualization from the GPU texture
-            // For now, we'll create a grid visualization since we can't directly render the GPU texture
-            // In a real implementation, we'd use a proper texture rendering pipeline
+            // Read dye data from GPU
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let dye_data = rt.block_on(self.simulation.read_dye_data()).unwrap();
 
-            // Draw grid background
-            painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(20, 20, 40));
+            // Draw fluid simulation
+            for y in 0..self.simulation.height() {
+                for x in 0..self.simulation.width() {
+                    let idx = (y * self.simulation.width() + x) * 4; // RGBA format
+                    if idx + 3 < dye_data.len() {
+                        let r = dye_data[idx];
+                        let g = dye_data[idx + 1];
+                        let b = dye_data[idx + 2];
+                        let a = dye_data[idx + 3];
+
+                        // Create color from dye data
+                        let color = egui::Color32::from_rgb(
+                            (r * 255.0) as u8,
+                            (g * 255.0) as u8,
+                            (b * 255.0) as u8
+                        );
+
+                        let cell_rect = egui::Rect::from_min_size(
+                            egui::Pos2::new(rect.left() + x as f32 * self.cell_size,
+                                           rect.top() + y as f32 * self.cell_size),
+                            egui::Vec2::new(self.cell_size, self.cell_size)
+                        );
+
+                        painter.rect_filled(cell_rect, 0.0, color);
+                    }
+                }
+            }
 
             // Draw grid lines
-            for i in 0..=self.simulation.width() {
-                let x = rect.left() + i as f32 * self.cell_size;
+            for i in 0..=self.simulation.height() {
+                let y = rect.top() + i as f32 * self.cell_size;
                 painter.line_segment(
-                    [egui::Pos2::new(x, rect.top()), egui::Pos2::new(x, rect.bottom())],
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 40, 60)),
+                    [egui::Pos2::new(rect.left(), y), egui::Pos2::new(rect.right(), y)],
+                    egui::Stroke::new(0.5, egui::Color32::from_gray(30)),
                 );
+            }
+
+            // Draw drag indicator if dragging
+            if let (Some(start), Some(current)) = (self.mouse_start_pos, self.mouse_current_pos) {
+                painter.line_segment(
+                    [start, current],
+                    egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 255, 255))
+                );
+
+                painter.circle_filled(current, 3.0, egui::Color32::from_rgb(255, 255, 255));
             }
 
             for i in 0..=self.simulation.height() {
                 let y = rect.top() + i as f32 * self.cell_size;
                 painter.line_segment(
                     [egui::Pos2::new(rect.left(), y), egui::Pos2::new(rect.right(), y)],
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 40, 60)),
+                    egui::Stroke::new(0.5, egui::Color32::from_gray(30)),
                 );
             }
-
-            // Draw simulation status
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "GPU Fluid Simulation - Running",
-                egui::FontId::default(),
-                egui::Color32::WHITE,
-            );
 
             // Update simulation if not paused
             if !self.paused {

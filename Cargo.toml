@@ -5,7 +5,7 @@ edition = "2024"
 description = "Interactive fluid simulation with real-time mouse interaction and colorful dye visualization"
 authors = ["ekg"]
 license = "MIT"
-repository = "https://github.com/ekg/liquid"
+repository = "https://github.com/ekg/itsliquid"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

@@ -7,6 +7,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.len() > 1 && args[1] == "test" {
         // Run headless test and export PNGs
         run_headless_test()?;
+    } else if args.len() > 1 && args[1] == "gpu-test" {
+        // Run GPU test
+        #[cfg(feature = "gpu")]
+        run_gpu_test()?;
+
+        #[cfg(not(feature = "gpu"))]
+        {
+            eprintln!("GPU feature not enabled. Build with --features gpu");
+            std::process::exit(1);
+        }
     } else {
         // Run GUI application
         run_gui_app();
@@ -141,11 +151,99 @@ fn run_gui_app() {
         ..Default::default()
     };
 
-    // Use the interactive fluid simulation with RGB dye visualization
-    eframe::run_native(
-        "itsliquid",
-        options,
-        Box::new(|_cc| Box::new(itsliquid::InteractiveApp::new(100, 100))),
-    )
-    .unwrap();
+    // Use GPU version if feature is enabled, otherwise use CPU version
+    #[cfg(feature = "gpu")]
+    {
+        eframe::run_native(
+            "itsliquid",
+            options,
+            Box::new(|_cc| Box::new(itsliquid::GPUInteractiveApp::new(100, 100))),
+        )
+        .unwrap();
+    }
+
+    #[cfg(not(feature = "gpu"))]
+    {
+        eframe::run_native(
+            "itsliquid",
+            options,
+            Box::new(|_cc| Box::new(itsliquid::InteractiveApp::new(100, 100))),
+        )
+        .unwrap();
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn run_gpu_test() -> Result<(), Box<dyn std::error::Error>> {
+    use itsliquid::gpu_functional::FunctionalGPUFluid;
+    use itsliquid::FluidSimulation;
+
+    println!("Running GPU fluid simulation test...");
+
+    let rt = tokio::runtime::Runtime::new()?;
+
+    rt.block_on(async {
+        // Create GPU simulation
+        let width = 200;
+        let height = 200;
+        let mut simulation = FunctionalGPUFluid::new(width, height).await?;
+
+        println!("GPU simulation initialized: {}x{}", width, height);
+
+        // Add initial fluid as a horizontal line with velocity
+        println!("Adding initial dye and velocity...");
+        for i in 0..40 {
+            simulation.add_dye(100 + i, 100, (1.0, 0.0, 0.0)); // Red dye
+            simulation.add_force(100 + i, 100, glam::Vec2::new(3.0, 0.0));
+        }
+
+        // Export initial state
+        export_gpu_frame(&simulation, 0).await?;
+
+        // Run simulation and export frames
+        for frame in 1..=20 {
+            println!("Simulating frame {}...", frame);
+            simulation.step();
+            export_gpu_frame(&simulation, frame).await?;
+        }
+
+        println!("GPU test completed! Generated 21 frames.");
+        Ok::<(), Box<dyn std::error::Error>>(())
+    })?;
+
+    Ok(())
+}
+
+#[cfg(feature = "gpu")]
+async fn export_gpu_frame(
+    simulation: &itsliquid::gpu_functional::FunctionalGPUFluid,
+    frame: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use image::{ImageBuffer, Rgba};
+
+    // Read dye data from GPU
+    let dye_data = simulation.read_dye_data().await?;
+    let width = simulation.gpu_width();
+    let height = simulation.gpu_height();
+
+    // Create image from dye data
+    let mut img = ImageBuffer::new(width, height);
+
+    for y in 0..height {
+        for x in 0..width {
+            let idx = ((y * width + x) * 4) as usize;
+            if idx + 3 < dye_data.len() {
+                let r = (dye_data[idx] * 255.0).clamp(0.0, 255.0) as u8;
+                let g = (dye_data[idx + 1] * 255.0).clamp(0.0, 255.0) as u8;
+                let b = (dye_data[idx + 2] * 255.0).clamp(0.0, 255.0) as u8;
+                img.put_pixel(x, y, Rgba([r, g, b, 255]));
+            }
+        }
+    }
+
+    let filename = format!("gpu_test_frame_{:04}.png", frame);
+    img.save(&filename)?;
+    println!("  Exported: {}", filename);
+
+    Ok(())
 }
