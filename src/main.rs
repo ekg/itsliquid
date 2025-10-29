@@ -190,11 +190,11 @@ fn run_gpu_test() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("GPU simulation initialized: {}x{}", width, height);
 
-        // Add initial fluid WITHOUT velocity to test if advection preserves dye
-        println!("Adding initial dye (NO velocity)...");
+        // Add initial fluid WITH velocity to test movement
+        println!("Adding initial dye with velocity...");
         for i in 0..40 {
             simulation.add_dye(100 + i, 100, (1.0, 0.0, 0.0)); // Red dye
-            // NO velocity - advection should preserve dye in place
+            simulation.add_force(100 + i, 100, glam::Vec2::new(10.0, 0.0)); // Strong rightward velocity
         }
 
         // Export initial state

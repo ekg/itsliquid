@@ -413,42 +413,47 @@ impl FunctionalGPUFluid {
                 }
 
                 let coord = vec2<u32>(global_id.x, global_id.y);
-                let x = i32(coord.x);
-                let y = i32(coord.y);
+                let x = f32(global_id.x);
+                let y = f32(global_id.y);
 
-                // Skip boundaries
-                if (x <= 0 || x >= i32(params.width - 1) || y <= 0 || y >= i32(params.height - 1)) {
-                    return;
+                // Get velocity at current position
+                let vel = sample_velocity(coord);
+
+                // Backtrace to find source position
+                let src_x = x - params.dt * vel.x;
+                let src_y = y - params.dt * vel.y;
+
+                // Clamp to valid range
+                let clamped_x = max(0.0, min(src_x, f32(params.width - 1)));
+                let clamped_y = max(0.0, min(src_y, f32(params.height - 1)));
+
+                // Get integer coordinates for bilinear interpolation
+                let ix0 = u32(clamped_x);
+                let iy0 = u32(clamped_y);
+                var ix1 = ix0 + 1u;
+                if (ix1 >= params.width) {
+                    ix1 = params.width - 1u;
+                }
+                var iy1 = iy0 + 1u;
+                if (iy1 >= params.height) {
+                    iy1 = params.height - 1u;
                 }
 
-                // Advect dye using current velocity field, reading from PREVIOUS dye buffer
-                let velocity_current = sample_velocity(coord);
-                let src_x = f32(x) - params.dt * velocity_current.x;
-                let src_y = f32(y) - params.dt * velocity_current.y;
+                // Get fractional parts
+                let fx = clamped_x - f32(ix0);
+                let fy = clamped_y - f32(iy0);
 
-                let clamped_x = max(0.5, min(src_x, f32(params.width - 1) - 0.5));
-                let clamped_y = max(0.5, min(src_y, f32(params.height - 1) - 0.5));
+                // Bilinear interpolation
+                let d00 = sample_dye_prev(vec2<u32>(ix0, iy0));
+                let d10 = sample_dye_prev(vec2<u32>(ix1, iy0));
+                let d01 = sample_dye_prev(vec2<u32>(ix0, iy1));
+                let d11 = sample_dye_prev(vec2<u32>(ix1, iy1));
 
-                let x0 = u32(floor(clamped_x));
-                let x1 = u32(min(f32(params.width - 1), f32(x0) + 1.0));
-                let y0 = u32(floor(clamped_y));
-                let y1 = u32(min(f32(params.height - 1), f32(y0) + 1.0));
+                let d0 = d00 * (1.0 - fx) + d10 * fx;
+                let d1 = d01 * (1.0 - fx) + d11 * fx;
+                let result = d0 * (1.0 - fy) + d1 * fy;
 
-                let tx = clamped_x - f32(x0);
-                let ty = clamped_y - f32(y0);
-
-                // Sample from PREVIOUS dye buffer to avoid race conditions
-                let d00 = sample_dye_prev(vec2<u32>(x0, y0));
-                let d01 = sample_dye_prev(vec2<u32>(x1, y0));
-                let d10 = sample_dye_prev(vec2<u32>(x0, y1));
-                let d11 = sample_dye_prev(vec2<u32>(x1, y1));
-
-                let advected_dye = (1.0 - tx) * (1.0 - ty) * d00
-                    + tx * (1.0 - ty) * d01
-                    + (1.0 - tx) * ty * d10
-                    + tx * ty * d11;
-
-                set_dye(coord, advected_dye);
+                set_dye(coord, result);
             }
             
             // Boundary conditions for velocity
@@ -757,18 +762,13 @@ impl FunctionalGPUFluid {
     }
 
     pub fn step(&mut self) {
-        // Test: ONLY diffusion, NO advection at all
-        // We know diffusion works from earlier tests
-
-        // Copy dye to dye_prev for double buffering
+        // Test: ONLY copy, no advection at all
+        // This will test if copy_dye_to_prev actually works
         self.run_compute_pass(&self.copy_dye_to_prev_pipeline);
-
-        // Diffuse dye once
-        self.run_compute_pass(&self.diffuse_dye_pipeline);
-        self.run_compute_pass(&self.set_dye_boundaries_pipeline);
-
-        // Ensure all GPU operations complete
         self.device.poll(wgpu::Maintain::Wait);
+
+        // Don't call advection - just leave dye as-is
+        // Dye should persist because we're not modifying it
     }
 
     fn run_compute_pass(&self, pipeline: &ComputePipeline) {
