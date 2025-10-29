@@ -184,27 +184,24 @@ impl eframe::App for GPUInteractiveApp {
                     let y = ((pos.y - rect.top()) / self.cell_size) as usize;
 
                     if x < self.simulation.width() && y < self.simulation.height() {
-                        // Add dye droplet
+                        // Add dye droplet - very small concentrated point
                         let dye_color = self.dye_colors[self.current_dye_index];
 
-                        // Add dye in a small circular pattern
-                        for dy in -2..=2 {
-                            for dx in -2..=2 {
-                                let px = (x as i32 + dx) as usize;
-                                let py = (y as i32 + dy) as usize;
+                        // Just add at the center point - like a tiny droplet
+                        self.simulation.add_dye(x, y, dye_color);
 
-                                if px < self.simulation.width() && py < self.simulation.height() {
-                                    let dist_sq = (dx * dx + dy * dy) as f32;
-                                    if dist_sq <= 4.0 {
-                                        let falloff = 1.0 - dist_sq / 4.0;
-                                        self.simulation.add_dye(px, py, (
-                                            dye_color.0 * falloff,
-                                            dye_color.1 * falloff,
-                                            dye_color.2 * falloff
-                                        ));
-                                    }
-                                }
-                            }
+                        // Optional: add tiny bit to immediate neighbors for smooth appearance
+                        if x > 0 {
+                            self.simulation.add_dye(x - 1, y, (dye_color.0 * 0.3, dye_color.1 * 0.3, dye_color.2 * 0.3));
+                        }
+                        if x < self.simulation.width() - 1 {
+                            self.simulation.add_dye(x + 1, y, (dye_color.0 * 0.3, dye_color.1 * 0.3, dye_color.2 * 0.3));
+                        }
+                        if y > 0 {
+                            self.simulation.add_dye(x, y - 1, (dye_color.0 * 0.3, dye_color.1 * 0.3, dye_color.2 * 0.3));
+                        }
+                        if y < self.simulation.height() - 1 {
+                            self.simulation.add_dye(x, y + 1, (dye_color.0 * 0.3, dye_color.1 * 0.3, dye_color.2 * 0.3));
                         }
                     }
                 }
@@ -217,27 +214,24 @@ impl eframe::App for GPUInteractiveApp {
                     let y = ((pos.y - rect.top()) / self.cell_size) as usize;
 
                     if x < self.simulation.width() && y < self.simulation.height() {
-                        // Add dye droplet
+                        // Add dye droplet - very small concentrated point
                         let dye_color = self.dye_colors[self.current_dye_index];
 
-                        // Add dye in a small circular pattern
-                        for dy in -2..=2 {
-                            for dx in -2..=2 {
-                                let px = (x as i32 + dx) as usize;
-                                let py = (y as i32 + dy) as usize;
+                        // Just add at the center point - like a tiny droplet (reduced for continuous stream)
+                        self.simulation.add_dye(x, y, (dye_color.0 * 0.5, dye_color.1 * 0.5, dye_color.2 * 0.5));
 
-                                if px < self.simulation.width() && py < self.simulation.height() {
-                                    let dist_sq = (dx * dx + dy * dy) as f32;
-                                    if dist_sq <= 4.0 {
-                                        let falloff = 1.0 - dist_sq / 4.0;
-                                        self.simulation.add_dye(px, py, (
-                                            dye_color.0 * falloff * 0.3, // Reduce intensity for continuous stream
-                                            dye_color.1 * falloff * 0.3,
-                                            dye_color.2 * falloff * 0.3
-                                        ));
-                                    }
-                                }
-                            }
+                        // Optional: add tiny bit to immediate neighbors
+                        if x > 0 {
+                            self.simulation.add_dye(x - 1, y, (dye_color.0 * 0.15, dye_color.1 * 0.15, dye_color.2 * 0.15));
+                        }
+                        if x < self.simulation.width() - 1 {
+                            self.simulation.add_dye(x + 1, y, (dye_color.0 * 0.15, dye_color.1 * 0.15, dye_color.2 * 0.15));
+                        }
+                        if y > 0 {
+                            self.simulation.add_dye(x, y - 1, (dye_color.0 * 0.15, dye_color.1 * 0.15, dye_color.2 * 0.15));
+                        }
+                        if y < self.simulation.height() - 1 {
+                            self.simulation.add_dye(x, y + 1, (dye_color.0 * 0.15, dye_color.1 * 0.15, dye_color.2 * 0.15));
                         }
                     }
                 }
