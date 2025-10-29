@@ -147,8 +147,8 @@ async fn test_gpu_simulation_dye_persistence() {
     // Create a small GPU simulation
     let mut sim = FunctionalGPUFluid::new(50, 50).await.unwrap();
 
-    // Add dye at a point
-    sim.add_dye(25, 25, (5.0, 0.0, 0.0));
+    // Add dye at a point (GPU uses different method names)
+    sim.gpu_add_dye(25, 25, (5.0, 0.0, 0.0));
 
     // Run a few steps
     for _ in 0..5 {
@@ -183,9 +183,9 @@ async fn test_gpu_simulation_force_application() {
 
     let mut sim = FunctionalGPUFluid::new(50, 50).await.unwrap();
 
-    // Add dye and force
-    sim.add_dye(25, 25, (5.0, 0.0, 0.0));
-    sim.add_force(25, 25, glam::Vec2::new(10.0, 0.0));
+    // Add dye and force (GPU uses different method names)
+    sim.gpu_add_dye(25, 25, (5.0, 0.0, 0.0));
+    sim.gpu_add_force(25, 25, glam::Vec2::new(10.0, 0.0));
 
     // Run several steps to see movement
     for _ in 0..10 {
