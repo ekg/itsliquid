@@ -193,7 +193,7 @@ fn run_gpu_test() -> Result<(), Box<dyn std::error::Error>> {
         // Add initial fluid WITH velocity to test movement
         println!("Adding initial dye with velocity...");
         for i in 0..40 {
-            simulation.add_dye(100 + i, 100, (1.0, 0.0, 0.0)); // Red dye
+            simulation.add_dye(100 + i, 100, (5.0, 0.0, 0.0)); // Bright red dye
             simulation.add_force(100 + i, 100, glam::Vec2::new(10.0, 0.0)); // Strong rightward velocity
         }
 

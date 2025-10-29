@@ -82,9 +82,9 @@ impl FunctionalGPUFluid {
         let params = SimulationParams {
             width,
             height,
-            dt: 0.5,  // Moderate timestep for stable simulation
-            viscosity: 0.0001,  // Low viscosity to preserve velocity
-            diffusion: 0.000001,  // Very low diffusion to preserve dye
+            dt: 0.1,
+            viscosity: 0.00001,
+            diffusion: 0.00001,
             _padding: [0, 0],
         };
 
@@ -405,7 +405,7 @@ impl FunctionalGPUFluid {
                 set_velocity(coord, advected_velocity);
             }
             
-            // Dye advection using current velocity field (like CPU)
+            // Dye advection using current velocity field
             @compute @workgroup_size(8, 8)
             fn advect_dye(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (global_id.x >= params.width || global_id.y >= params.height) {
@@ -416,44 +416,36 @@ impl FunctionalGPUFluid {
                 let x = f32(global_id.x);
                 let y = f32(global_id.y);
 
-                // Get velocity at current position
+                // Get velocity
                 let vel = sample_velocity(coord);
 
-                // Backtrace to find source position
-                let src_x = x - params.dt * vel.x;
-                let src_y = y - params.dt * vel.y;
+                // Backtrace
+                var src_x = x - params.dt * vel.x;
+                var src_y = y - params.dt * vel.y;
 
-                // Clamp to valid range
-                let clamped_x = max(0.0, min(src_x, f32(params.width - 1)));
-                let clamped_y = max(0.0, min(src_y, f32(params.height - 1)));
+                // Clamp
+                if (src_x < 0.5) { src_x = 0.5; }
+                if (src_x > f32(params.width) - 1.5) { src_x = f32(params.width) - 1.5; }
+                if (src_y < 0.5) { src_y = 0.5; }
+                if (src_y > f32(params.height) - 1.5) { src_y = f32(params.height) - 1.5; }
 
-                // Get integer coordinates for bilinear interpolation
-                let ix0 = u32(clamped_x);
-                let iy0 = u32(clamped_y);
-                var ix1 = ix0 + 1u;
-                if (ix1 >= params.width) {
-                    ix1 = params.width - 1u;
-                }
-                var iy1 = iy0 + 1u;
-                if (iy1 >= params.height) {
-                    iy1 = params.height - 1u;
-                }
+                // Integer coordinates
+                let i0 = u32(src_x);
+                let j0 = u32(src_y);
+                let i1 = i0 + 1u;
+                let j1 = j0 + 1u;
 
-                // Get fractional parts
-                let fx = clamped_x - f32(ix0);
-                let fy = clamped_y - f32(iy0);
+                // Fractions
+                let s1 = src_x - f32(i0);
+                let s0 = 1.0 - s1;
+                let t1 = src_y - f32(j0);
+                let t0 = 1.0 - t1;
 
-                // Bilinear interpolation
-                let d00 = sample_dye_prev(vec2<u32>(ix0, iy0));
-                let d10 = sample_dye_prev(vec2<u32>(ix1, iy0));
-                let d01 = sample_dye_prev(vec2<u32>(ix0, iy1));
-                let d11 = sample_dye_prev(vec2<u32>(ix1, iy1));
+                // Sample and interpolate
+                let dye = s0 * (t0 * sample_dye_prev(vec2<u32>(i0, j0)) + t1 * sample_dye_prev(vec2<u32>(i0, j1)))
+                        + s1 * (t0 * sample_dye_prev(vec2<u32>(i1, j0)) + t1 * sample_dye_prev(vec2<u32>(i1, j1)));
 
-                let d0 = d00 * (1.0 - fx) + d10 * fx;
-                let d1 = d01 * (1.0 - fx) + d11 * fx;
-                let result = d0 * (1.0 - fy) + d1 * fy;
-
-                set_dye(coord, result);
+                set_dye(coord, dye);
             }
             
             // Boundary conditions for velocity
@@ -762,13 +754,43 @@ impl FunctionalGPUFluid {
     }
 
     pub fn step(&mut self) {
-        // Test: ONLY copy, no advection at all
-        // This will test if copy_dye_to_prev actually works
-        self.run_compute_pass(&self.copy_dye_to_prev_pipeline);
-        self.device.poll(wgpu::Maintain::Wait);
+        // Full GPU fluid simulation
 
-        // Don't call advection - just leave dye as-is
-        // Dye should persist because we're not modifying it
+        // Velocity: copy to prev
+        self.run_compute_pass(&self.copy_velocity_to_prev_pipeline);
+
+        // Velocity: diffuse (2 iterations)
+        for _ in 0..2 {
+            self.run_compute_pass(&self.diffuse_velocity_pipeline);
+            self.run_compute_pass(&self.set_velocity_boundaries_pipeline);
+        }
+
+        // Velocity: project
+        self.run_compute_pass(&self.project_velocity_pipeline);
+        self.run_compute_pass(&self.set_velocity_boundaries_pipeline);
+
+        // Velocity: advect
+        self.run_compute_pass(&self.advect_velocity_pipeline);
+        self.run_compute_pass(&self.set_velocity_boundaries_pipeline);
+
+        // Velocity: project again
+        self.run_compute_pass(&self.project_velocity_pipeline);
+        self.run_compute_pass(&self.set_velocity_boundaries_pipeline);
+
+        // Dye: copy to prev
+        self.run_compute_pass(&self.copy_dye_to_prev_pipeline);
+
+        // Dye: diffuse (1 iteration)
+        self.run_compute_pass(&self.diffuse_dye_pipeline);
+        self.run_compute_pass(&self.set_dye_boundaries_pipeline);
+        self.run_compute_pass(&self.copy_dye_to_prev_pipeline);
+
+        // Dye: advect
+        self.run_compute_pass(&self.advect_dye_pipeline);
+        self.run_compute_pass(&self.set_dye_boundaries_pipeline);
+
+        // Final sync
+        self.device.poll(wgpu::Maintain::Wait);
     }
 
     fn run_compute_pass(&self, pipeline: &ComputePipeline) {
