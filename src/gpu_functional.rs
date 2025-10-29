@@ -82,9 +82,9 @@ impl FunctionalGPUFluid {
         let params = SimulationParams {
             width,
             height,
-            dt: 1.0,  // Increased for more visible movement
-            viscosity: 0.0001,  // Reduced to preserve velocity better
-            diffusion: 0.00001,  // Reduced to preserve dye better
+            dt: 0.5,  // Moderate timestep for stable simulation
+            viscosity: 0.0001,  // Low viscosity to preserve velocity
+            diffusion: 0.000001,  // Very low diffusion to preserve dye
             _padding: [0, 0],
         };
 
@@ -757,17 +757,15 @@ impl FunctionalGPUFluid {
     }
 
     pub fn step(&mut self) {
-        // Simplified step - no velocity processing, just dye diffusion
-        // This should at least preserve the dye without movement
+        // Test: ONLY diffusion, NO advection at all
+        // We know diffusion works from earlier tests
 
         // Copy dye to dye_prev for double buffering
         self.run_compute_pass(&self.copy_dye_to_prev_pipeline);
 
-        // Diffuse dye (2 iterations)
-        for _ in 0..2 {
-            self.run_compute_pass(&self.diffuse_dye_pipeline);
-            self.run_compute_pass(&self.copy_dye_to_prev_pipeline);
-        }
+        // Diffuse dye once
+        self.run_compute_pass(&self.diffuse_dye_pipeline);
+        self.run_compute_pass(&self.set_dye_boundaries_pipeline);
 
         // Ensure all GPU operations complete
         self.device.poll(wgpu::Maintain::Wait);
