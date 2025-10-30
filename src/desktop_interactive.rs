@@ -94,6 +94,23 @@ impl eframe::App for InteractiveApp {
                 ui.label(format!(" ({}x{} cells)", self.simulation.width, self.simulation.height));
             });
 
+            // Calculate and display dye mass
+            let total_dye_r: f32 = self.simulation.dye_r.iter().sum();
+            let total_dye_g: f32 = self.simulation.dye_g.iter().sum();
+            let total_dye_b: f32 = self.simulation.dye_b.iter().sum();
+            let total_dye = total_dye_r + total_dye_g + total_dye_b;
+
+            let max_dye_r = self.simulation.dye_r.iter().cloned().fold(0.0f32, f32::max);
+            let max_dye_g = self.simulation.dye_g.iter().cloned().fold(0.0f32, f32::max);
+            let max_dye_b = self.simulation.dye_b.iter().cloned().fold(0.0f32, f32::max);
+            let max_dye = max_dye_r.max(max_dye_g).max(max_dye_b);
+
+            ui.horizontal(|ui| {
+                ui.label(format!("Total Dye Mass: {:.2} (R:{:.2} G:{:.2} B:{:.2})",
+                    total_dye, total_dye_r, total_dye_g, total_dye_b));
+                ui.label(format!(" | Max: {:.2}", max_dye));
+            });
+
             ui.separator();
 
             // Calculate canvas size
@@ -240,14 +257,28 @@ impl eframe::App for InteractiveApp {
             // Render simulation
             let painter = ui.painter();
 
+            // Find max dye value for adaptive tone mapping
+            let max_dye = self.simulation.dye_r.iter()
+                .chain(self.simulation.dye_g.iter())
+                .chain(self.simulation.dye_b.iter())
+                .cloned()
+                .fold(0.0f32, f32::max)
+                .max(1.0); // At least 1.0 to avoid division by zero
+
             for y in 0..self.simulation.height {
                 for x in 0..self.simulation.width {
                     let idx = y * self.simulation.width + x;
 
-                    // Get dye color
-                    let r = self.simulation.dye_r[idx].min(1.0).max(0.0);
-                    let g = self.simulation.dye_g[idx].min(1.0).max(0.0);
-                    let b = self.simulation.dye_b[idx].min(1.0).max(0.0);
+                    // Get dye color with Reinhard tone mapping for HDR values
+                    // Maps [0, ∞) to [0, 1) smoothly
+                    let r_raw = self.simulation.dye_r[idx];
+                    let g_raw = self.simulation.dye_g[idx];
+                    let b_raw = self.simulation.dye_b[idx];
+
+                    // Reinhard tone mapping: x / (1 + x)
+                    let r = (r_raw / (1.0 + r_raw)).max(0.0);
+                    let g = (g_raw / (1.0 + g_raw)).max(0.0);
+                    let b = (b_raw / (1.0 + b_raw)).max(0.0);
 
                     // Create color based on dye concentration
                     let color = egui::Color32::from_rgb(
