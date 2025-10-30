@@ -48,3 +48,31 @@ pub use render::Renderer;
 
 #[cfg(feature = "gpu")]
 pub use desktop_gpu::GPUInteractiveApp;
+
+// WASM entry point
+#[cfg(target_arch = "wasm32")]
+use eframe::wasm_bindgen::{self, prelude::*};
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn start(canvas_id: String) -> Result<(), JsValue> {
+    // Setup panic hook for better error messages
+    console_error_panic_hook::set_once();
+
+    // Initialize logging
+    console_log::init_with_level(log::Level::Debug).ok();
+
+    wasm_bindgen_futures::spawn_local(async move {
+        let web_options = eframe::WebOptions::default();
+        eframe::WebRunner::new()
+            .start(
+                &canvas_id,
+                web_options,
+                Box::new(|_cc| Box::new(InteractiveApp::new(100, 100))),
+            )
+            .await
+            .expect("failed to start eframe");
+    });
+
+    Ok(())
+}

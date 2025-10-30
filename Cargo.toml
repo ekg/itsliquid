@@ -33,8 +33,10 @@ optional = true
 console_error_panic_hook = "0.1"
 console_log = "0.2"
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
 getrandom = { version = "0.2", features = ["js"] }
 web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "CanvasRenderingContext2d"] }
+log = "0.4"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

@@ -2218,10 +2218,12 @@ dependencies = [
  "getrandom 0.2.16",
  "glam",
  "image 0.25.8",
+ "log",
  "rand",
  "rayon",
  "tokio",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
  "wgpu 0.20.1",
 ]
