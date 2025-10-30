@@ -1,5 +1,7 @@
 use crate::FluidSimulation;
 use glam::Vec2;
+
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 #[derive(Debug, Clone)]
@@ -268,96 +270,87 @@ impl InteractiveFluid {
     }
 
     pub fn advect_dye(&mut self) {
-        // Calculate total dye mass before advection for conservation (parallel reduction)
-        let (total_r_before, total_g_before, total_b_before) = self.dye_r_prev.par_iter()
-            .zip(&self.dye_g_prev)
-            .zip(&self.dye_b_prev)
-            .map(|((&r, &g), &b)| (r, g, b))
-            .reduce(|| (0.0, 0.0, 0.0), |(r1, g1, b1), (r2, g2, b2)| (r1 + r2, g1 + g2, b1 + b2));
+        // Calculate total dye mass before advection for conservation
+        #[cfg(not(target_arch = "wasm32"))]
+        let (total_r_before, total_g_before, total_b_before) = {
+            self.dye_r_prev.par_iter()
+                .zip(&self.dye_g_prev)
+                .zip(&self.dye_b_prev)
+                .map(|((&r, &g), &b)| (r, g, b))
+                .reduce(|| (0.0, 0.0, 0.0), |(r1, g1, b1), (r2, g2, b2)| (r1 + r2, g1 + g2, b1 + b2))
+        };
 
-        // Parallel advection
-        let width = self.width;
-        let height = self.height;
-        let dt = self.dt;
+        #[cfg(target_arch = "wasm32")]
+        let (total_r_before, total_g_before, total_b_before) = {
+            let r: f32 = self.dye_r_prev.iter().sum();
+            let g: f32 = self.dye_g_prev.iter().sum();
+            let b: f32 = self.dye_b_prev.iter().sum();
+            (r, g, b)
+        };
 
-        // Process rows in parallel
-        self.dye_r.par_chunks_mut(width)
-            .zip(self.dye_g.par_chunks_mut(width))
-            .zip(self.dye_b.par_chunks_mut(width))
-            .zip(self.velocity_x.par_chunks(width))
-            .zip(self.velocity_y.par_chunks(width))
-            .enumerate()
-            .for_each(|(y, ((((dye_r_row, dye_g_row), dye_b_row), vel_x_row), vel_y_row))| {
-                if y == 0 || y == height - 1 {
-                    return; // Skip boundary rows
-                }
+        // Advection (serial for WASM compatibility)
+        for y in 1..self.height - 1 {
+            for x in 1..self.width - 1 {
+                let idx = y * self.width + x;
 
-                for x in 1..width - 1 {
-                    let idx = y * width + x;
+                // Backtrace using current velocity field
+                let src_x = x as f32 - self.dt * self.velocity_x[idx];
+                let src_y = y as f32 - self.dt * self.velocity_y[idx];
 
-                    // Backtrace using current velocity field
-                    let src_x = x as f32 - dt * vel_x_row[x];
-                    let src_y = y as f32 - dt * vel_y_row[x];
+                // Clamp to valid range
+                let src_x = src_x.max(0.5).min((self.width - 1) as f32 - 0.5);
+                let src_y = src_y.max(0.5).min((self.height - 1) as f32 - 0.5);
 
-                    // Clamp to valid range
-                    let src_x = src_x.max(0.5).min((width - 1) as f32 - 0.5);
-                    let src_y = src_y.max(0.5).min((height - 1) as f32 - 0.5);
+                // Bilinear interpolation
+                let x0 = src_x.floor() as usize;
+                let x1 = x0 + 1;
+                let y0 = src_y.floor() as usize;
+                let y1 = y0 + 1;
 
-                    // Bilinear interpolation
-                    let x0 = src_x.floor() as usize;
-                    let x1 = x0 + 1;
-                    let y0 = src_y.floor() as usize;
-                    let y1 = y0 + 1;
+                let sx = src_x - x0 as f32;
+                let sy = src_y - y0 as f32;
 
-                    let sx = src_x - x0 as f32;
-                    let sy = src_y - y0 as f32;
+                let idx00 = y0 * self.width + x0;
+                let idx01 = y0 * self.width + x1;
+                let idx10 = y1 * self.width + x0;
+                let idx11 = y1 * self.width + x1;
 
-                    let idx00 = y0 * width + x0;
-                    let idx01 = y0 * width + x1;
-                    let idx10 = y1 * width + x0;
-                    let idx11 = y1 * width + x1;
+                // Advect dye with bilinear interpolation
+                self.dye_r[idx] = (1.0 - sx) * (1.0 - sy) * self.dye_r_prev[idx00]
+                    + sx * (1.0 - sy) * self.dye_r_prev[idx01]
+                    + (1.0 - sx) * sy * self.dye_r_prev[idx10]
+                    + sx * sy * self.dye_r_prev[idx11];
 
-                    // Advect dye with bilinear interpolation
-                    dye_r_row[x] = (1.0 - sx) * (1.0 - sy) * self.dye_r_prev[idx00]
-                        + sx * (1.0 - sy) * self.dye_r_prev[idx01]
-                        + (1.0 - sx) * sy * self.dye_r_prev[idx10]
-                        + sx * sy * self.dye_r_prev[idx11];
+                self.dye_g[idx] = (1.0 - sx) * (1.0 - sy) * self.dye_g_prev[idx00]
+                    + sx * (1.0 - sy) * self.dye_g_prev[idx01]
+                    + (1.0 - sx) * sy * self.dye_g_prev[idx10]
+                    + sx * sy * self.dye_g_prev[idx11];
 
-                    dye_g_row[x] = (1.0 - sx) * (1.0 - sy) * self.dye_g_prev[idx00]
-                        + sx * (1.0 - sy) * self.dye_g_prev[idx01]
-                        + (1.0 - sx) * sy * self.dye_g_prev[idx10]
-                        + sx * sy * self.dye_g_prev[idx11];
-
-                    dye_b_row[x] = (1.0 - sx) * (1.0 - sy) * self.dye_b_prev[idx00]
-                        + sx * (1.0 - sy) * self.dye_b_prev[idx01]
-                        + (1.0 - sx) * sy * self.dye_b_prev[idx10]
-                        + sx * sy * self.dye_b_prev[idx11];
-                }
-            });
+                self.dye_b[idx] = (1.0 - sx) * (1.0 - sy) * self.dye_b_prev[idx00]
+                    + sx * (1.0 - sy) * self.dye_b_prev[idx01]
+                    + (1.0 - sx) * sy * self.dye_b_prev[idx10]
+                    + sx * sy * self.dye_b_prev[idx11];
+            }
+        }
 
         self.set_dye_boundaries();
 
-        // Apply mass conservation correction (parallel reduction and scaling)
-        let (total_r_after, total_g_after, total_b_after) = self.dye_r.par_iter()
-            .zip(&self.dye_g)
-            .zip(&self.dye_b)
-            .map(|((&r, &g), &b)| (r, g, b))
-            .reduce(|| (0.0, 0.0, 0.0), |(r1, g1, b1), (r2, g2, b2)| (r1 + r2, g1 + g2, b1 + b2));
+        // Apply mass conservation correction
+        let total_r_after: f32 = self.dye_r.iter().sum();
+        let total_g_after: f32 = self.dye_g.iter().sum();
+        let total_b_after: f32 = self.dye_b.iter().sum();
 
-        // Parallel rescaling to conserve mass
+        // Rescale to conserve mass
         if total_r_after > 1e-10 && total_g_after > 1e-10 && total_b_after > 1e-10 {
             let scale_r = total_r_before / total_r_after;
             let scale_g = total_g_before / total_g_after;
             let scale_b = total_b_before / total_b_after;
 
-            self.dye_r.par_iter_mut()
-                .zip(self.dye_g.par_iter_mut())
-                .zip(self.dye_b.par_iter_mut())
-                .for_each(|((r, g), b)| {
-                    *r *= scale_r;
-                    *g *= scale_g;
-                    *b *= scale_b;
-                });
+            for i in 0..self.dye_r.len() {
+                self.dye_r[i] *= scale_r;
+                self.dye_g[i] *= scale_g;
+                self.dye_b[i] *= scale_b;
+            }
         }
     }
 
