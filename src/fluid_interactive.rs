@@ -136,7 +136,7 @@ impl InteractiveFluid {
         self.set_boundaries();
     }
 
-    fn diffuse_velocity(&mut self) {
+    pub fn diffuse_velocity(&mut self) {
         let a = self.dt * self.viscosity * (self.width * self.height) as f32;
 
         for _ in 0..4 {
@@ -162,7 +162,7 @@ impl InteractiveFluid {
         }
     }
 
-    fn diffuse_dye(&mut self) {
+    pub fn diffuse_dye(&mut self) {
         // Track mass before diffusion
         let total_r_before: f32 = self.dye_r.iter().sum();
         let total_g_before: f32 = self.dye_g.iter().sum();
@@ -225,7 +225,7 @@ impl InteractiveFluid {
         }
     }
 
-    fn advect_velocity(&mut self) {
+    pub fn advect_velocity(&mut self) {
         for y in 1..self.height - 1 {
             for x in 1..self.width - 1 {
                 let idx = y * self.width + x;
@@ -267,7 +267,7 @@ impl InteractiveFluid {
         self.set_velocity_boundaries();
     }
 
-    fn advect_dye(&mut self) {
+    pub fn advect_dye(&mut self) {
         // Calculate total dye mass before advection for conservation (parallel reduction)
         let (total_r_before, total_g_before, total_b_before) = self.dye_r_prev.par_iter()
             .zip(&self.dye_g_prev)
@@ -361,7 +361,7 @@ impl InteractiveFluid {
         }
     }
 
-    fn project_velocity(&mut self) {
+    pub fn project_velocity(&mut self) {
         let h = 1.0 / self.width as f32;
 
         // Calculate divergence
@@ -379,20 +379,37 @@ impl InteractiveFluid {
 
         self.set_pressure_boundaries();
 
-        // Solve for pressure
-        for _ in 0..20 {
+        // Solve for pressure with adaptive convergence
+        let convergence_threshold = 0.001;
+        let max_iterations = 20;
+
+        for iter in 0..max_iterations {
+            let mut max_change = 0.0f32;
+
             for y in 1..self.height - 1 {
                 for x in 1..self.width - 1 {
                     let idx = y * self.width + x;
+                    let old_pressure = self.pressure[idx];
                     self.pressure[idx] = (self.divergence[idx]
                         + self.pressure[idx - 1]
                         + self.pressure[idx + 1]
                         + self.pressure[idx - self.width]
                         + self.pressure[idx + self.width])
                         / 4.0;
+
+                    // Track convergence
+                    let change = (self.pressure[idx] - old_pressure).abs();
+                    if change > max_change {
+                        max_change = change;
+                    }
                 }
             }
             self.set_pressure_boundaries();
+
+            // Early exit if converged
+            if iter > 5 && max_change < convergence_threshold {
+                break;
+            }
         }
 
         // Subtract pressure gradient

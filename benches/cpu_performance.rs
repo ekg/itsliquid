@@ -42,13 +42,57 @@ fn benchmark_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("operations");
     let size = 100;
 
-    group.bench_function("diffuse_velocity", |b| {
-        let mut sim = InteractiveFluid::new(size, size);
-        sim.add_force(50, 50, glam::Vec2::new(10.0, 0.0), 1.0);
+    // Setup simulation with some state
+    let mut sim = InteractiveFluid::new(size, size);
+    sim.add_dye(50, 50, (10.0, 5.0, 3.0));
+    sim.add_force(50, 50, glam::Vec2::new(10.0, 5.0), 3.0);
+
+    // Run a few steps to get realistic state
+    for _ in 0..5 {
+        sim.step();
+    }
+
+    group.bench_function("project_velocity", |b| {
+        let mut sim = sim.clone();
+        b.iter(|| {
+            // Pressure projection (called 2x per step, 20 iterations each = 40 total)
+            black_box(sim.project_velocity());
+        });
+    });
+
+    group.bench_function("advect_dye", |b| {
+        let mut sim = sim.clone();
+        // Setup prev buffers
+        sim.dye_r_prev.copy_from_slice(&sim.dye_r);
+        sim.dye_g_prev.copy_from_slice(&sim.dye_g);
+        sim.dye_b_prev.copy_from_slice(&sim.dye_b);
 
         b.iter(|| {
-            // Just diffusion
-            black_box(&mut sim);
+            black_box(sim.advect_dye());
+        });
+    });
+
+    group.bench_function("diffuse_dye", |b| {
+        let mut sim = sim.clone();
+        b.iter(|| {
+            black_box(sim.diffuse_dye());
+        });
+    });
+
+    group.bench_function("advect_velocity", |b| {
+        let mut sim = sim.clone();
+        sim.velocity_x_prev.copy_from_slice(&sim.velocity_x);
+        sim.velocity_y_prev.copy_from_slice(&sim.velocity_y);
+
+        b.iter(|| {
+            black_box(sim.advect_velocity());
+        });
+    });
+
+    group.bench_function("diffuse_velocity", |b| {
+        let mut sim = sim.clone();
+        b.iter(|| {
+            black_box(sim.diffuse_velocity());
         });
     });
 
