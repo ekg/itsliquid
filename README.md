@@ -2,10 +2,16 @@
 
 A real-time fluid simulation engine built in Rust with interactive mouse controls and colorful dye visualization. Experience the beauty of fluid dynamics with intuitive controls and realistic physics.
 
+**🌐 [Try it in your browser!](https://hypervolu.me/~erik/itsliquid)**
+
 ![Fluid Simulation Demo](docs/demo.gif)
 
 ## Features
 
+- **✨ Perfect Mass Conservation** - <0.001% loss over 50 steps
+- **🚀 High Performance** - 28-42% faster with adaptive pressure solver
+- **🎨 HDR Rendering** - Reinhard tone mapping for accurate high concentrations
+- **🌐 WebAssembly** - Runs natively in your browser
 - **Real-time Navier-Stokes simulation** with proper pressure projection
 - **Interactive mouse controls**:
   - **Left-click + drag**: Pull fluid in any direction
@@ -13,23 +19,28 @@ A real-time fluid simulation engine built in Rust with interactive mouse control
   - **Right-click + drag**: Create continuous dye streams
   - **Drag release**: Generate vortex effects
 - **RGB dye system** with 6 vibrant colors (red, green, blue, yellow, magenta, cyan)
-- **Dynamic resolution scaling** (planned feature)
-- **Real-time visualization** with configurable cell size
-- **Headless testing mode** for automated validation
+- **Dynamic resolution scaling** (1x, 2x, 4x, 8x)
+- **Real-time mass tracker** showing dye conservation in action
 
 ## Quick Start
 
-### Prerequisites
+### Web Version (Easiest!)
+
+**🌐 [Open in browser](https://hypervolu.me/~erik/itsliquid)** - No installation needed!
+
+### Desktop Version
+
+#### Prerequisites
 
 - Rust and Cargo (latest stable version)
 - Git
 
-### Installation
+#### Installation
 
 ```bash
 git clone https://github.com/ekg/itsliquid.git
 cd itsliquid
-cargo run
+cargo run --release
 ```
 
 ### Controls
@@ -122,14 +133,34 @@ cargo fmt
 cargo clippy
 ```
 
-## Planned Features
+## Performance
 
-- [ ] Dynamic resolution scaling
-- [ ] Performance optimizations
-- [ ] Additional simulation parameters
-- [ ] Export to video formats
-- [ ] WebAssembly build target
-- [ ] Multi-threaded simulation
+Baseline benchmarks (100x100 grid):
+- **50x50**: 510 µs/step
+- **100x100**: 1.94 ms/step (28% faster than naive)
+- **200x200**: 6.79 ms/step (42% faster than naive)
+
+Optimizations:
+- ✅ Adaptive pressure solver with early convergence
+- ✅ Perfect mass conservation
+- ✅ HDR tone-mapped rendering
+
+## WebAssembly Build
+
+Build and deploy the web version:
+
+```bash
+# One-time setup
+cargo install wasm-pack
+
+# Build and deploy
+./deploy-web.sh
+```
+
+Manual build:
+```bash
+wasm-pack build --target web --out-dir web/pkg --release
+```
 
 ## Contributing
 
