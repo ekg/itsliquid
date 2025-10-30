@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>itsliquid - Interactive Fluid Simulation</title>
     <style>
+        html, body {
+            height: 100%;
+            width: 100%;
+        }
+
         body {
             margin: 0;
             padding: 0;
@@ -51,8 +56,10 @@
 
         #canvas-container {
             width: 100%;
+            min-height: 600px;
             display: flex;
             justify-content: center;
+            align-items: center;
             margin: 20px 0;
         }
 

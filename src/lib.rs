@@ -62,16 +62,26 @@ pub fn start(canvas_id: String) -> Result<(), JsValue> {
     // Initialize logging
     console_log::init_with_level(log::Level::Debug).ok();
 
+    log::info!("Starting itsliquid WASM...");
+
     wasm_bindgen_futures::spawn_local(async move {
+        log::info!("Creating WebRunner...");
         let web_options = eframe::WebOptions::default();
-        eframe::WebRunner::new()
+
+        match eframe::WebRunner::new()
             .start(
                 &canvas_id,
                 web_options,
-                Box::new(|_cc| Box::new(InteractiveApp::new(100, 100))),
+                Box::new(|_cc| {
+                    log::info!("Creating InteractiveApp...");
+                    Box::new(InteractiveApp::new(100, 100))
+                }),
             )
             .await
-            .expect("failed to start eframe");
+        {
+            Ok(_) => log::info!("eframe started successfully!"),
+            Err(e) => log::error!("Failed to start eframe: {:?}", e),
+        }
     });
 
     Ok(())

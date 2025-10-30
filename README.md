@@ -162,6 +162,104 @@ Manual build:
 wasm-pack build --target web --out-dir web/pkg --release
 ```
 
+## Browser Testing
+
+Automated browser testing for the WASM version using Playwright. Tests run in headless Firefox/Chrome and verify:
+- WASM module initialization
+- Console log monitoring (including Rust logs via `console_log` crate)
+- User interaction simulation (clicks, drags)
+- Visual regression testing with screenshots
+- Performance and stability
+
+### Quick Start
+
+```bash
+# Run automated tests (builds WASM, installs dependencies, runs tests)
+./test-web.sh
+```
+
+### Test Options
+
+```bash
+# Run with visible browser (see what's happening)
+./test-web.sh --headed
+
+# Use Chromium instead of Firefox
+./test-web.sh --chromium
+
+# Debug mode (step through tests interactively)
+./test-web.sh --debug
+
+# Interactive UI mode
+./test-web.sh --ui
+```
+
+### Manual Testing
+
+```bash
+cd web
+
+# First time setup
+npm install
+npm run install-browsers
+
+# Run tests
+npm test                    # Headless Firefox
+npm run test:headed         # Visible browser
+npm run test:firefox        # Firefox specifically
+npm run test:debug          # Debug mode
+npm run test:ui             # Interactive UI
+
+# View test report
+npx playwright show-report
+```
+
+### Test Coverage
+
+The test suite (`web/tests/wasm-simulation.spec.js`) includes:
+
+1. **WASM Module Loading**
+   - Loading indicator verification
+   - Module initialization success
+   - Console log capture (Rust → JavaScript)
+   - Error detection
+
+2. **Canvas and Rendering**
+   - Canvas dimensions and visibility
+   - Visual rendering verification
+   - Screenshot capture
+
+3. **User Interactions**
+   - Left-click drag (fluid forces)
+   - Right-click (dye addition)
+   - Multi-step interaction sequences
+   - Position-based click simulation
+
+4. **Console Monitoring**
+   - Captures all console types (log, info, warn, error, debug)
+   - Verifies Rust initialization logs
+   - Detects runtime errors
+   - Timestamps all messages
+
+5. **Performance & Stability**
+   - 10-second continuous run
+   - Rapid interaction stress testing
+   - Memory leak detection
+
+### Test Results
+
+Test artifacts are saved to `web/test-results/`:
+- `canvas-initial-render.png` - Initial state
+- `after-drag-interaction.png` - After fluid force
+- `after-dye.png` - After dye addition
+- `after-sequence.png` - After multi-step interactions
+- `after-rapid-clicks.png` - Stress test results
+
+View detailed HTML report:
+```bash
+cd web && npx playwright show-report
+```
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues and pull requests.

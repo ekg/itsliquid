@@ -1,0 +1,17 @@
+{
+  "name": "itsliquid-web-tests",
+  "version": "1.0.0",
+  "description": "Automated browser testing for itsliquid WASM simulation",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:firefox": "playwright test --project=firefox",
+    "test:debug": "playwright test --debug",
+    "test:ui": "playwright test --ui",
+    "install-browsers": "playwright install firefox chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0"
+  }
+}
