@@ -1,41 +1,58 @@
-# itsliquid - Interactive Fluid Simulation
+# itsliquid
 
-A real-time fluid simulation engine built in Rust with interactive mouse controls and colorful dye visualization. Experience the beauty of fluid dynamics with intuitive controls and realistic physics.
+A real-time fluid simulation that runs in your browser. Paint with dye, push the fluid around, create vortexes, and watch physics do its thing.
 
-**🌐 [Try it in your browser!](https://hypervolu.me/~erik/itsliquid)**
+**🌐 [Try it live!](https://hypervolu.me/~erik/itsliquid)**
 
 ![Fluid Simulation Demo](docs/demo.gif)
 
+## What is this?
+
+itsliquid simulates incompressible fluids using the Navier-Stokes equations. It's built in Rust, compiles to WebAssembly, and runs at 60fps in your browser. No installation needed.
+
+You can:
+- Paint colorful dye into the fluid
+- Push and pull the fluid around with forces
+- Create swirling attractors that trap and spin the dye
+- Place persistent elements that keep pumping dye and forces
+- Mix colors and watch them diffuse naturally
+- Erase things when you want to start fresh
+
+Everything is interactive and responds to your touch/mouse in real-time.
+
+## Tools
+
+- **🎨 Dye** - Click/drag to paint colored dye into the fluid
+- **💨 Force** - Drag to push the fluid around
+- **🔍 Eyedropper** - Sample colors from the simulation
+- **🌀 Attractor** - Create swirling vortexes that pull dye inward
+- **🗑 Eraser** - Remove persistent elements you've placed
+- **📌 Pin Mode** - Toggle to place persistent sources
+  - With dye: drag to paint a line of continuous dye sources
+  - With force: drag to set direction, creates persistent force
+  - With attractor: click to place permanent vortex
+
+## Controls
+
+- **Left click/tap + drag** - Use the selected tool
+- **Color swatches** - Pick your dye color (black removes dye!)
+- **Sliders** - Adjust intensity, radius, and strength
+- **⏸ Pause/▶ Resume** - Freeze/unfreeze the simulation
+- **🗑 Clear** - Reset everything to blank
+- **1x/2x/4x/8x** - Change grid resolution
+
 ## Features
 
-- **✨ Perfect Mass Conservation** - <0.001% loss over 50 steps
-- **🚀 High Performance** - 28-42% faster with adaptive pressure solver
-- **🎨 HDR Rendering** - Reinhard tone mapping for accurate high concentrations
-- **🌐 WebAssembly** - Runs natively in your browser
-- **Real-time Navier-Stokes simulation** with proper pressure projection
-- **Interactive mouse controls**:
-  - **Left-click + drag**: Pull fluid in any direction
-  - **Right-click**: Add colorful dye droplets
-  - **Right-click + drag**: Create continuous dye streams
-  - **Drag release**: Generate vortex effects
-- **RGB dye system** with 6 vibrant colors (red, green, blue, yellow, magenta, cyan)
-- **Dynamic resolution scaling** (1x, 2x, 4x, 8x)
-- **Real-time mass tracker** showing dye conservation in action
+- **Perfect mass conservation** - Dye doesn't mysteriously vanish (<0.001% loss)
+- **HDR rendering** - Reinhard tone mapping handles super bright dye concentrations
+- **Persistent elements** - Place dye sources, forces, and attractors that run continuously
+- **Real Navier-Stokes physics** - Advection, diffusion, pressure projection, the whole deal
+- **Runs in your browser** - WebAssembly means native performance, no plugins
+- **Touch-friendly** - Works great on phones and tablets
 
-## Quick Start
+## Running locally
 
-### Web Version (Easiest!)
-
-**🌐 [Open in browser](https://hypervolu.me/~erik/itsliquid)** - No installation needed!
-
-### Desktop Version
-
-#### Prerequisites
-
-- Rust and Cargo (latest stable version)
-- Git
-
-#### Installation
+Want to hack on it or run the desktop version?
 
 ```bash
 git clone https://github.com/ekg/itsliquid.git
@@ -43,233 +60,78 @@ cd itsliquid
 cargo run --release
 ```
 
-### Controls
-
-- **Left Mouse Button**: Click and drag to pull fluid
-- **Right Mouse Button**: Click to add dye, drag to create streams
-- **Pause/Resume**: Use the button in the UI
-- **Cell Size**: Adjust visualization scale with the slider
-- **Dye Colors**: Select from 6 different colors
-
-## Usage
-
-### Interactive Mode (Default)
-
-Run the interactive GUI application:
-
-```bash
-cargo run
-```
-
-### Headless Test Mode
-
-Run automated tests and generate analysis:
-
-```bash
-cargo run -- test
-```
-
-This will:
-- Run a 20-frame simulation
-- Export PNG images of each frame
-- Generate quantitative analysis of fluid behavior
-- Print debug visualizations
-
-## Project Structure
-
-```
-src/
-├── fluid_interactive.rs    # Main interactive fluid simulation
-├── desktop_interactive.rs  # GUI application with mouse controls
-├── fluid_final.rs          # Optimized fluid solver
-├── desktop.rs              # Basic desktop application
-├── export.rs               # PNG export functionality
-├── analysis.rs             # Quantitative analysis tools
-├── render.rs               # Visualization utilities
-└── lib.rs                  # Module exports
-```
-
-## Technical Details
-
-### Physics Engine
-
-The simulation implements the incompressible Navier-Stokes equations:
-- **Advection**: Fluid movement through velocity field
-- **Diffusion**: Viscosity effects
-- **Pressure Projection**: Ensures incompressibility
-- **Boundary Conditions**: Proper handling of simulation edges
-
-### Dye System
-
-- RGB channels for colorful visualization
-- Separate diffusion and advection for dye
-- Interactive injection with falloff patterns
-- Real-time color mixing
-
-## Development
-
-### Building
-
-```bash
-cargo build
-```
-
-### Testing
-
-```bash
-# Run headless test with analysis
-cargo run -- test
-
-# Run unit tests
-cargo test
-```
-
-### Code Style
-
-This project follows standard Rust conventions. Please run:
-
-```bash
-cargo fmt
-cargo clippy
-```
-
-## Performance
-
-Baseline benchmarks (100x100 grid):
-- **50x50**: 510 µs/step
-- **100x100**: 1.94 ms/step (28% faster than naive)
-- **200x200**: 6.79 ms/step (42% faster than naive)
-
-Optimizations:
-- ✅ Adaptive pressure solver with early convergence
-- ✅ Perfect mass conservation
-- ✅ HDR tone-mapped rendering
-
-## WebAssembly Build
-
-Build and deploy the web version:
+Build the web version:
 
 ```bash
 # One-time setup
 cargo install wasm-pack
 
 # Build and deploy
-./deploy-web.sh
+./deploy-web-bust-cache.sh
 ```
 
-Manual build:
-```bash
-wasm-pack build --target web --out-dir web/pkg --release
+## How it works
+
+The simulation solves the incompressible Navier-Stokes equations:
+
+1. **Advection** - Fluid carries dye and velocity along with it
+2. **Diffusion** - Things spread out over time (viscosity)
+3. **Pressure projection** - Makes the fluid incompressible (divergence-free velocity field)
+4. **Boundary conditions** - Keeps everything contained at the edges
+
+The dye is separate from the velocity field but gets carried along by it. RGB channels mean you get real color mixing.
+
+## Project structure
+
+```
+src/
+├── fluid_interactive.rs    # Main fluid solver with perfect mass conservation
+├── desktop_interactive.rs  # Interactive GUI with all the tools
+├── fluid_final.rs          # Optimized pressure solver
+├── export.rs               # PNG export for screenshots
+├── analysis.rs             # Metrics and debugging
+└── lib.rs                  # Module exports and WASM entry point
 ```
 
-## Browser Testing
+## Performance
 
-Automated browser testing for the WASM version using Playwright. Tests run in headless Firefox/Chrome and verify:
-- WASM module initialization
-- Console log monitoring (including Rust logs via `console_log` crate)
-- User interaction simulation (clicks, drags)
-- Visual regression testing with screenshots
-- Performance and stability
+On a 100×100 grid:
+- **50×50**: ~500 µs per timestep
+- **100×100**: ~2 ms per timestep
+- **200×200**: ~7 ms per timestep
 
-### Quick Start
+Runs at 60fps on most devices. The adaptive pressure solver converges early when it can, saving ~30-40% compute on average.
 
-```bash
-# Run automated tests (builds WASM, installs dependencies, runs tests)
-./test-web.sh
-```
+## Testing
 
-### Test Options
-
-```bash
-# Run with visible browser (see what's happening)
-./test-web.sh --headed
-
-# Use Chromium instead of Firefox
-./test-web.sh --chromium
-
-# Debug mode (step through tests interactively)
-./test-web.sh --debug
-
-# Interactive UI mode
-./test-web.sh --ui
-```
-
-### Manual Testing
+There's automated browser testing with Playwright:
 
 ```bash
-cd web
-
-# First time setup
-npm install
-npm run install-browsers
-
-# Run tests
-npm test                    # Headless Firefox
-npm run test:headed         # Visible browser
-npm run test:firefox        # Firefox specifically
-npm run test:debug          # Debug mode
-npm run test:ui             # Interactive UI
-
-# View test report
-npx playwright show-report
+./test-web.sh               # Headless Firefox
+./test-web.sh --headed      # Watch it run
+./test-web.sh --ui          # Interactive mode
 ```
 
-### Test Coverage
+Tests verify WASM loading, user interactions, console logs, and visual rendering.
 
-The test suite (`web/tests/wasm-simulation.spec.js`) includes:
+## Technical details
 
-1. **WASM Module Loading**
-   - Loading indicator verification
-   - Module initialization success
-   - Console log capture (Rust → JavaScript)
-   - Error detection
-
-2. **Canvas and Rendering**
-   - Canvas dimensions and visibility
-   - Visual rendering verification
-   - Screenshot capture
-
-3. **User Interactions**
-   - Left-click drag (fluid forces)
-   - Right-click (dye addition)
-   - Multi-step interaction sequences
-   - Position-based click simulation
-
-4. **Console Monitoring**
-   - Captures all console types (log, info, warn, error, debug)
-   - Verifies Rust initialization logs
-   - Detects runtime errors
-   - Timestamps all messages
-
-5. **Performance & Stability**
-   - 10-second continuous run
-   - Rapid interaction stress testing
-   - Memory leak detection
-
-### Test Results
-
-Test artifacts are saved to `web/test-results/`:
-- `canvas-initial-render.png` - Initial state
-- `after-drag-interaction.png` - After fluid force
-- `after-dye.png` - After dye addition
-- `after-sequence.png` - After multi-step interactions
-- `after-rapid-clicks.png` - Stress test results
-
-View detailed HTML report:
-```bash
-cd web && npx playwright show-report
-```
+- **Point sink attractors** - Uses `v = -σ/(2πr²) × direction` for realistic vortex behavior
+- **Sponge layer** - Exponential damping near attractor boundaries traps dye without hard walls
+- **Adaptive convergence** - Pressure solver exits early when residual is small
+- **Mass renormalization** - After diffusion and advection, total dye mass is preserved
+- **Cache busting** - Deployment script adds version timestamps to force browser updates
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues and pull requests.
+Pull requests welcome! This started as a learning project and grew into something fun.
 
 ## License
 
-This project is open source. See LICENSE file for details.
+MIT - see LICENSE file
 
-## Acknowledgments
+## Credits
 
-- Based on Jos Stam's "Real-Time Fluid Dynamics for Games"
-- Built with the amazing Rust ecosystem
-- Uses egui for the user interface
+- Fluid simulation based on Jos Stam's "[Real-Time Fluid Dynamics for Games](https://www.dgp.toronto.edu/public_user/stam/reality/Research/pdf/GDC03.pdf)"
+- Built with [Rust](https://www.rust-lang.org/), [egui](https://github.com/emilk/egui), and [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen)
+- Testing with [Playwright](https://playwright.dev/)

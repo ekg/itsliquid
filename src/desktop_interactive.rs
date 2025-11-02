@@ -161,7 +161,7 @@ impl eframe::App for InteractiveApp {
                     if ui.selectable_label(self.selected_tool == Tool::Eyedropper, "🔍").clicked() {
                         self.selected_tool = Tool::Eyedropper;
                     }
-                    if ui.selectable_label(self.selected_tool == Tool::Attractor, "🧲").clicked() {
+                    if ui.selectable_label(self.selected_tool == Tool::Attractor, "🌀").clicked() {
                         self.selected_tool = Tool::Attractor;
                     }
                     if ui.selectable_label(self.selected_tool == Tool::Eraser, "🗑").clicked() {
@@ -191,11 +191,6 @@ impl eframe::App for InteractiveApp {
                             self.simulation.velocity_x[i] = 0.0;
                             self.simulation.velocity_y[i] = 0.0;
                         }
-                    }
-
-                    if ui.button("🧹 Clear Pins").clicked() {
-                        // Clear all persistent elements
-                        self.persistent_elements.clear();
                     }
 
                     ui.separator();
@@ -410,21 +405,43 @@ impl eframe::App for InteractiveApp {
             match self.selected_tool {
                 Tool::Dye => {
                     if self.placement_mode {
-                        // In placement mode: click to place persistent dye source
-                        if response.clicked() {
+                        // In placement mode: click or drag to place persistent dye sources
+                        let is_interacting = response.clicked() || response.dragged();
+
+                        if is_interacting {
                             if let Some(pos) = response.interact_pointer_pos() {
                                 let grid_x = ((pos.x - rect.left()) / cell_size) as f32;
                                 let grid_y = ((pos.y - rect.top()) / cell_size) as f32;
 
-                                self.persistent_elements.push(PersistentElement {
-                                    element_type: PersistentElementType::DyeSource {
-                                        color: self.dye_colors[self.current_dye_index],
-                                        intensity: self.dye_intensity,
-                                    },
-                                    x: grid_x,
-                                    y: grid_y,
-                                    radius: 3.0,
+                                // Only add if not too close to existing elements (avoid overlap)
+                                let min_spacing = 5.0; // Grid cells
+                                let should_add = self.persistent_elements.iter().all(|elem| {
+                                    let dx = elem.x - grid_x;
+                                    let dy = elem.y - grid_y;
+                                    let dist = (dx * dx + dy * dy).sqrt();
+                                    dist > min_spacing
                                 });
+
+                                if should_add {
+                                    self.persistent_elements.push(PersistentElement {
+                                        element_type: PersistentElementType::DyeSource {
+                                            color: self.dye_colors[self.current_dye_index],
+                                            intensity: self.dye_intensity,
+                                        },
+                                        x: grid_x,
+                                        y: grid_y,
+                                        radius: 3.0,
+                                    });
+                                }
+                            }
+                        }
+
+                        // Disable placement mode when interaction ends
+                        if response.drag_stopped() {
+                            self.placement_mode = false;
+                        } else if !response.dragged() && !response.is_pointer_button_down_on() {
+                            // Also disable if not dragging and pointer is up (handles single click)
+                            if is_interacting {
                                 self.placement_mode = false;
                             }
                         }
