@@ -50,6 +50,19 @@ Everything is interactive and responds to your touch/mouse in real-time.
 - **Runs in your browser** - WebAssembly means native performance, no plugins
 - **Touch-friendly** - Works great on phones and tablets
 
+## Sharing (Links)
+
+You can share your pinned setups with a link:
+
+- Enable "📌 Pin Mode" and place Dye, Force, and Attractor pins.
+- The page URL updates automatically with a hash (s=...). Copy and share it.
+- Opening the link restores the pinned elements and starts the simulation from a clean slate.
+- Saved: pin type, position, radius, and parameters (color/intensity/strength). Not saved: the evolving dye/velocity fields.
+- The format is versioned for compatibility; older links continue to work.
+- Practical note: very long hashes can be truncated by some apps; most creations fit comfortably.
+
+Example: `https://hypervolu.me/~erik/itsliquid/#s=...`
+
 ## Running locally
 
 Want to hack on it or run the desktop version?
