@@ -1,4 +1,14 @@
 use crate::InteractiveFluid;
+#[cfg(target_arch = "wasm32")]
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+#[cfg(target_arch = "wasm32")]
+use base64::Engine as _;
+#[cfg(target_arch = "wasm32")]
+use serde::{Deserialize, Serialize};
+#[cfg(target_arch = "wasm32")]
+use serde_json;
+#[cfg(target_arch = "wasm32")]
+use web_sys;
 use eframe::egui;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +61,10 @@ pub struct InteractiveApp {
     placement_mode: bool,
     eraser_radius: f32,
     eraser_pos: Option<egui::Pos2>,
+    #[cfg(target_arch = "wasm32")]
+    url_state_loaded: bool,
+    #[cfg(target_arch = "wasm32")]
+    last_share_hash: Option<String>,
 }
 
 impl InteractiveApp {
@@ -90,6 +104,10 @@ impl InteractiveApp {
             placement_mode: false,
             eraser_radius: 30.0,
             eraser_pos: None,
+            #[cfg(target_arch = "wasm32")]
+            url_state_loaded: false,
+            #[cfg(target_arch = "wasm32")]
+            last_share_hash: None,
         }
     }
 
@@ -112,6 +130,14 @@ impl InteractiveApp {
 
 impl eframe::App for InteractiveApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // WASM: on first frame, try to load share state from URL
+        #[cfg(target_arch = "wasm32")]
+        {
+            if !self.url_state_loaded {
+                self.try_load_share_state_from_url();
+                self.url_state_loaded = true;
+            }
+        }
         // Detect window resize (or first load)
         let current_size = ctx.screen_rect().size();
         let should_resize = if let Some(last_size) = self.last_window_size {
@@ -873,6 +899,183 @@ impl eframe::App for InteractiveApp {
             }
         });
 
+        // WASM: update URL hash if persistent elements changed
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.update_url_hash_if_needed();
+        }
+
         ctx.request_repaint();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Serialize, Deserialize, Debug)]
+struct ShareState {
+    v: u8,            // schema version
+    w: u32,           // base width at encoding time
+    h: u32,           // base height at encoding time
+    e: Vec<ShareElem> // elements
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "t")]
+enum ShareElem {
+    #[serde(rename = "d")]
+    Dye { x: f32, y: f32, r: f32, c: [f32; 3], i: f32 },
+    #[serde(rename = "f")]
+    Force { x: f32, y: f32, r: f32, d: [f32; 2], i: f32 },
+    #[serde(rename = "a")]
+    Attr { x: f32, y: f32, r: f32, s: f32 },
+}
+
+#[cfg(target_arch = "wasm32")]
+impl InteractiveApp {
+    // Encode current persistent elements to a base64url string
+    fn encode_share_state(&self) -> Option<String> {
+        // Nothing to share
+        if self.persistent_elements.is_empty() {
+            return Some(String::from("s="));
+        }
+
+        let width = self.simulation.width as f32;
+        let height = self.simulation.height as f32;
+        let cell_size = 8.0_f32; // matches UI layout assumptions
+
+        let mut elems: Vec<ShareElem> = Vec::with_capacity(self.persistent_elements.len());
+        for elem in &self.persistent_elements {
+            match elem.element_type {
+                PersistentElementType::DyeSource { color, intensity } => {
+                    elems.push(ShareElem::Dye {
+                        x: (elem.x / width).clamp(0.0, 1.0),
+                        y: (elem.y / height).clamp(0.0, 1.0),
+                        r: (elem.radius / width).min(elem.radius / height),
+                        c: [color.0, color.1, color.2],
+                        i: intensity,
+                    });
+                }
+                PersistentElementType::ForceSource { direction, intensity } => {
+                    // Store direction in grid-cell units for portability
+                    let dir_cells = [direction.0 as f32 / cell_size, direction.1 as f32 / cell_size];
+                    elems.push(ShareElem::Force {
+                        x: (elem.x / width).clamp(0.0, 1.0),
+                        y: (elem.y / height).clamp(0.0, 1.0),
+                        r: (elem.radius / width).min(elem.radius / height),
+                        d: dir_cells,
+                        i: intensity,
+                    });
+                }
+                PersistentElementType::AttractorSource { strength } => {
+                    elems.push(ShareElem::Attr {
+                        x: (elem.x / width).clamp(0.0, 1.0),
+                        y: (elem.y / height).clamp(0.0, 1.0),
+                        r: (elem.radius / width).min(elem.radius / height),
+                        s: strength,
+                    });
+                }
+            }
+        }
+
+        let state = ShareState {
+            v: 1,
+            w: self.base_width as u32,
+            h: self.base_height as u32,
+            e: elems,
+        };
+
+        if let Ok(json) = serde_json::to_string(&state) {
+            let b64 = URL_SAFE_NO_PAD.encode(json.as_bytes());
+            Some(format!("s={}", b64))
+        } else {
+            None
+        }
+    }
+
+    // Try to load share state from window.location.hash
+    fn try_load_share_state_from_url(&mut self) {
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => return,
+        };
+        let location = window.location();
+        let hash = location.hash().unwrap_or_default();
+        // Expect forms: "#s=..." or "s=..."
+        let trimmed = hash.strip_prefix('#').unwrap_or(hash.as_str());
+        if trimmed.is_empty() {
+            return;
+        }
+        // Find s= parameter (support multiple params)
+        let mut b64 = None;
+        for part in trimmed.split('&') {
+            if let Some(val) = part.strip_prefix("s=") {
+                if !val.is_empty() {
+                    b64 = Some(val);
+                    break;
+                }
+            }
+        }
+        let Some(b64val) = b64 else { return; };
+        let data = match URL_SAFE_NO_PAD.decode(b64val) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        let Ok(state) = serde_json::from_slice::<ShareState>(&data) else { return; };
+        self.apply_share_state(state);
+        log::info!("Applied share state from URL: {} elements", self.persistent_elements.len());
+    }
+
+    fn apply_share_state(&mut self, state: ShareState) {
+        let width = self.simulation.width as f32;
+        let height = self.simulation.height as f32;
+        let cell_size = 8.0_f32;
+
+        self.persistent_elements.clear();
+        for se in state.e.into_iter() {
+            match se {
+                ShareElem::Dye { x, y, r, c, i } => {
+                    self.persistent_elements.push(PersistentElement {
+                        element_type: PersistentElementType::DyeSource { color: (c[0], c[1], c[2]), intensity: i },
+                        x: (x * width).clamp(0.0, width - 1.0),
+                        y: (y * height).clamp(0.0, height - 1.0),
+                        radius: (r * width).max(1e-3),
+                    });
+                }
+                ShareElem::Force { x, y, r, d, i } => {
+                    // Convert direction from cells back to pixel delta to preserve current behavior
+                    let dir_pixels = (d[0] * cell_size, d[1] * cell_size);
+                    self.persistent_elements.push(PersistentElement {
+                        element_type: PersistentElementType::ForceSource { direction: dir_pixels, intensity: i },
+                        x: (x * width).clamp(0.0, width - 1.0),
+                        y: (y * height).clamp(0.0, height - 1.0),
+                        radius: (r * width).max(1e-3),
+                    });
+                }
+                ShareElem::Attr { x, y, r, s } => {
+                    self.persistent_elements.push(PersistentElement {
+                        element_type: PersistentElementType::AttractorSource { strength: s },
+                        x: (x * width).clamp(0.0, width - 1.0),
+                        y: (y * height).clamp(0.0, height - 1.0),
+                        radius: (r * width).max(1e-3),
+                    });
+                }
+            }
+        }
+    }
+
+    fn update_url_hash_if_needed(&mut self) {
+        let Some(hash) = self.encode_share_state() else { return; };
+        if self.last_share_hash.as_ref() == Some(&hash) {
+            return;
+        }
+        if let Some(window) = web_sys::window() {
+            // Avoid growing history: use replaceState with updated hash fragment
+            if let Some(history) = window.history().ok() {
+                let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&format!("#{}", hash)));
+            } else {
+                let _ = window.location().set_hash(&hash);
+            }
+            self.last_share_hash = Some(hash);
+        }
     }
 }

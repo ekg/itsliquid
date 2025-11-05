@@ -19,6 +19,9 @@ rayon = "1.10"
 rand = "0.8"
 bytemuck = "1.0"
 tokio = { version = "1.0", features = ["full"], optional = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 
 [features]
 default = ["cpu"]
@@ -35,7 +38,7 @@ console_log = "0.2"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 getrandom = { version = "0.2", features = ["js"] }
-web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "CanvasRenderingContext2d"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "CanvasRenderingContext2d", "History", "Location"] }
 log = "0.4"
 
 [dev-dependencies]
