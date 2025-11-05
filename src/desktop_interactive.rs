@@ -62,6 +62,8 @@ pub struct InteractiveApp {
     eraser_radius: f32,
     eraser_pos: Option<egui::Pos2>,
     copy_feedback_until_frame: Option<usize>,
+    // Docking preference for tool panels
+    controls_dock: ControlsDockMode,
     #[cfg(target_arch = "wasm32")]
     url_state_loaded: bool,
     #[cfg(target_arch = "wasm32")]
@@ -106,6 +108,7 @@ impl InteractiveApp {
             eraser_radius: 30.0,
             eraser_pos: None,
             copy_feedback_until_frame: None,
+            controls_dock: ControlsDockMode::Auto,
             #[cfg(target_arch = "wasm32")]
             url_state_loaded: false,
             #[cfg(target_arch = "wasm32")]
@@ -130,6 +133,13 @@ impl InteractiveApp {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ControlsDockMode {
+    Auto,
+    Top,
+    Bottom,
+}
+
 impl eframe::App for InteractiveApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // WASM: on first frame, try to load share state from URL
@@ -140,28 +150,7 @@ impl eframe::App for InteractiveApp {
                 self.url_state_loaded = true;
             }
         }
-        // Detect window resize (or first load)
-        let current_size = ctx.screen_rect().size();
-        let should_resize = if let Some(last_size) = self.last_window_size {
-            // Check if size changed significantly
-            (current_size.x - last_size.x).abs() > 10.0 || (current_size.y - last_size.y).abs() > 10.0
-        } else {
-            // First frame - always resize to fit window
-            true
-        };
-
-        if should_resize {
-            // Window resized - recalculate simulation dimensions
-            // Keep cell size consistent, but use all available vertical space
-            let cell_size = 8.0;
-            let new_width = (current_size.x / cell_size).max(50.0) as usize;
-            // Account for toolbar (~90px) and bottom panel + safe area (~170px) = ~260px total
-            let new_height = ((current_size.y - 260.0) / cell_size).max(50.0) as usize;
-            self.simulation = InteractiveFluid::new(new_width, new_height);
-            self.base_width = new_width;
-            self.base_height = new_height;
-        }
-        self.last_window_size = Some(current_size);
+        // Responsive sizing handled after panels are laid out using available rect.
 
         // Toolbar at the top - organized in multiple rows to prevent overflow
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
@@ -249,20 +238,46 @@ impl eframe::App for InteractiveApp {
                         // Desktop build has no URL to copy; disable button
                         let _disabled = ui.add_enabled(false, egui::Button::new("🔗 Copy link")).on_hover_text("Available on the web version");
                     }
+
+                    ui.separator();
+
+                    // Controls docking preference
+                    egui::ComboBox::from_label("Controls")
+                        .selected_text(match self.controls_dock {
+                            ControlsDockMode::Auto => "Auto",
+                            ControlsDockMode::Top => "Top",
+                            ControlsDockMode::Bottom => "Bottom",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.controls_dock, ControlsDockMode::Auto, "Auto");
+                            ui.selectable_value(&mut self.controls_dock, ControlsDockMode::Top, "Top");
+                            ui.selectable_value(&mut self.controls_dock, ControlsDockMode::Bottom, "Bottom");
+                        });
                 });
             });
         });
 
-        // Tool-specific bottom panels - show BEFORE CentralPanel to reserve space
+        // Tool-specific panels - decide docking (top in landscape for visibility)
+        let screen_rect = ctx.screen_rect();
+        let is_landscape = screen_rect.width() >= screen_rect.height();
+        let dock_top = match self.controls_dock {
+            ControlsDockMode::Auto => is_landscape,
+            ControlsDockMode::Top => true,
+            ControlsDockMode::Bottom => false,
+        };
+
+        // Show panels BEFORE CentralPanel to reserve space
         match self.selected_tool {
             Tool::Dye => {
-                // Color picker at the bottom for Dye tool
-                egui::TopBottomPanel::bottom("color_picker")
-                    .min_height(150.0)
-                    .show_separator_line(true)
-                    .show(ctx, |ui| {
-                    ui.add_space(8.0);
-                    ui.vertical(|ui| {
+                let panel_id = "color_controls";
+                if dock_top {
+                    egui::TopBottomPanel::top(panel_id)
+                        .min_height(130.0)
+                        .show_separator_line(true)
+                        .show(ctx, |ui| {
+                            egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                                ui.add_space(6.0);
+                                ui.vertical(|ui| {
                         // Color swatches - one row
                         ui.horizontal(|ui| {
                             ui.label("Color:");
@@ -301,34 +316,93 @@ impl eframe::App for InteractiveApp {
                                 .show_value(true)
                                 .step_by(0.1));
                         });
-                    });
-                    ui.add_space(40.0);
-                });
+                                });
+                            });
+                        });
+                } else {
+                    egui::TopBottomPanel::bottom(panel_id)
+                        .min_height(130.0)
+                        .show_separator_line(true)
+                        .show(ctx, |ui| {
+                            egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                                ui.add_space(6.0);
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Color:");
+                                        for (i, &color) in self.dye_colors.iter().enumerate() {
+                                            let color_32 = egui::Color32::from_rgb(
+                                                (color.0 * 255.0) as u8,
+                                                (color.1 * 255.0) as u8,
+                                                (color.2 * 255.0) as u8
+                                            );
+                                            let size = egui::Vec2::new(26.0, 26.0);
+                                            let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+                                            ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.2, egui::Color32::GRAY));
+                                            ui.painter().rect_filled(rect.shrink(2.0), 1.5, color_32);
+                                            if self.current_dye_index == i {
+                                                ui.painter().rect_stroke(rect.shrink(0.5), 1.5, egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                            }
+                                            if response.clicked() {
+                                                self.current_dye_index = i;
+                                            }
+                                        }
+                                    });
+                                    ui.add_space(4.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label("Intensity:");
+                                        ui.add(egui::Slider::new(&mut self.dye_intensity, 0.1..=100.0)
+                                            .show_value(true)
+                                            .step_by(0.1));
+                                    });
+                                });
+                            });
+                        });
+                }
             },
             Tool::Force => {
-                // Force intensity slider at the bottom for Force tool
-                egui::TopBottomPanel::bottom("force_controls")
-                    .min_height(110.0)
-                    .show_separator_line(true)
-                    .show(ctx, |ui| {
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.label("Force Intensity:");
-                        ui.add(egui::Slider::new(&mut self.force_intensity, 0.01..=3.0)
-                            .show_value(true)
-                            .step_by(0.01));
-                    });
-                    ui.add_space(40.0);
-                });
+                let panel_id = "force_controls";
+                if dock_top {
+                    egui::TopBottomPanel::top(panel_id)
+                        .min_height(100.0)
+                        .show_separator_line(true)
+                        .show(ctx, |ui| {
+                            egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Force Intensity:");
+                                    ui.add(egui::Slider::new(&mut self.force_intensity, 0.01..=3.0)
+                                        .show_value(true)
+                                        .step_by(0.01));
+                                });
+                            });
+                        });
+                } else {
+                    egui::TopBottomPanel::bottom(panel_id)
+                        .min_height(100.0)
+                        .show_separator_line(true)
+                        .show(ctx, |ui| {
+                            egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Force Intensity:");
+                                    ui.add(egui::Slider::new(&mut self.force_intensity, 0.01..=3.0)
+                                        .show_value(true)
+                                        .step_by(0.01));
+                                });
+                            });
+                        });
+                }
             },
             Tool::Eyedropper => {
-                // Display sampled color info at the bottom for Eyedropper tool
-                egui::TopBottomPanel::bottom("eyedropper_info")
-                    .min_height(110.0)
-                    .show_separator_line(true)
-                    .show(ctx, |ui| {
-                    ui.add_space(8.0);
-                    ui.vertical(|ui| {
+                let panel_id = "eyedropper_info";
+                if dock_top {
+                    egui::TopBottomPanel::top(panel_id)
+                        .min_height(110.0)
+                        .show_separator_line(true)
+                        .show(ctx, |ui| {
+                            egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                                ui.add_space(6.0);
+                                ui.vertical(|ui| {
                         if let Some((r, g, b)) = self.sampled_color {
                             // Apply Reinhard tone mapping for display
                             let r_display = r / (1.0 + r);
@@ -371,59 +445,149 @@ impl eframe::App for InteractiveApp {
                         } else {
                             ui.label("Click on a cell to sample its color");
                         }
-                    });
-                    ui.add_space(40.0);
-                });
+                                });
+                            });
+                        });
+                } else {
+                    egui::TopBottomPanel::bottom(panel_id)
+                        .min_height(110.0)
+                        .show_separator_line(true)
+                        .show(ctx, |ui| {
+                            egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                                ui.add_space(6.0);
+                                ui.vertical(|ui| {
+                                    if let Some((r, g, b)) = self.sampled_color {
+                                        let r_display = r / (1.0 + r);
+                                        let g_display = g / (1.0 + g);
+                                        let b_display = b / (1.0 + b);
+                                        let r_255 = (r_display * 255.0).round() as u8;
+                                        let g_255 = (g_display * 255.0).round() as u8;
+                                        let b_255 = (b_display * 255.0).round() as u8;
+                                        ui.horizontal(|ui| {
+                                            let color_32 = egui::Color32::from_rgb(r_255, g_255, b_255);
+                                            let size = egui::Vec2::new(26.0, 26.0);
+                                            let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
+                                            ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.2, egui::Color32::GRAY));
+                                            ui.painter().rect_filled(rect.shrink(2.0), 1.5, color_32);
+                                            ui.separator();
+                                            ui.label(format!("RGB: ({}, {}, {})", r_255, g_255, b_255));
+                                            ui.separator();
+                                            let hex_string = format!("#{:02X}{:02X}{:02X}", r_255, g_255, b_255);
+                                            ui.label("Hex:");
+                                            let mut hex_text = hex_string.clone();
+                                            ui.add(egui::TextEdit::singleline(&mut hex_text)
+                                                .desired_width(80.0)
+                                                .interactive(false));
+                                            ui.separator();
+                                            ui.label(format!("HDR: ({:.3}, {:.3}, {:.3})", r, g, b));
+                                        });
+                                    } else {
+                                        ui.label("Click on a cell to sample its color");
+                                    }
+                                });
+                            });
+                        });
+                }
             },
             Tool::Attractor => {
-                // Attractor controls at the bottom
-                egui::TopBottomPanel::bottom("attractor_controls")
-                    .min_height(110.0)
-                    .show_separator_line(true)
-                    .show(ctx, |ui| {
-                    ui.add_space(8.0);
-                    ui.vertical(|ui| {
-                        // Attraction radius slider
-                        ui.horizontal(|ui| {
-                            ui.label("Radius:");
-                            ui.add(egui::Slider::new(&mut self.attractor_radius, 1.0..=200.0)
-                                .show_value(true)
-                                .step_by(1.0));
+                let panel_id = "attractor_controls";
+                if dock_top {
+                    egui::TopBottomPanel::top(panel_id)
+                        .min_height(120.0)
+                        .show_separator_line(true)
+                        .show(ctx, |ui| {
+                            egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Radius:");
+                                    ui.add(egui::Slider::new(&mut self.attractor_radius, 1.0..=200.0)
+                                        .show_value(true)
+                                        .step_by(1.0));
+                                });
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Strength:");
+                                    ui.add(egui::Slider::new(&mut self.attractor_strength, 0.1..=100.0)
+                                        .show_value(true)
+                                        .step_by(0.1));
+                                });
+                            });
                         });
-
-                        ui.add_space(4.0);
-
-                        // Attraction strength slider
-                        ui.horizontal(|ui| {
-                            ui.label("Strength:");
-                            ui.add(egui::Slider::new(&mut self.attractor_strength, 0.1..=100.0)
-                                .show_value(true)
-                                .step_by(0.1));
+                } else {
+                    egui::TopBottomPanel::bottom(panel_id)
+                        .min_height(120.0)
+                        .show_separator_line(true)
+                        .show(ctx, |ui| {
+                            egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Radius:");
+                                    ui.add(egui::Slider::new(&mut self.attractor_radius, 1.0..=200.0)
+                                        .show_value(true)
+                                        .step_by(1.0));
+                                });
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Strength:");
+                                    ui.add(egui::Slider::new(&mut self.attractor_strength, 0.1..=100.0)
+                                        .show_value(true)
+                                        .step_by(0.1));
+                                });
+                            });
                         });
-                    });
-                    ui.add_space(40.0);
-                });
+                }
             },
             Tool::Eraser => {
-                // Eraser controls at the bottom
-                egui::TopBottomPanel::bottom("eraser_controls")
-                    .min_height(110.0)
-                    .show_separator_line(true)
-                    .show(ctx, |ui| {
-                    ui.add_space(8.0);
-                    ui.vertical(|ui| {
-                        // Eraser radius slider
-                        ui.horizontal(|ui| {
-                            ui.label("Radius:");
-                            ui.add(egui::Slider::new(&mut self.eraser_radius, 10.0..=100.0)
-                                .show_value(true)
-                                .step_by(1.0));
+                let panel_id = "eraser_controls";
+                if dock_top {
+                    egui::TopBottomPanel::top(panel_id)
+                        .min_height(100.0)
+                        .show_separator_line(true)
+                        .show(ctx, |ui| {
+                            egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Radius:");
+                                    ui.add(egui::Slider::new(&mut self.eraser_radius, 10.0..=100.0)
+                                        .show_value(true)
+                                        .step_by(1.0));
+                                });
+                            });
                         });
-                    });
-                    ui.add_space(40.0);
-                });
+                } else {
+                    egui::TopBottomPanel::bottom(panel_id)
+                        .min_height(100.0)
+                        .show_separator_line(true)
+                        .show(ctx, |ui| {
+                            egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Radius:");
+                                    ui.add(egui::Slider::new(&mut self.eraser_radius, 10.0..=100.0)
+                                        .show_value(true)
+                                        .step_by(1.0));
+                                });
+                            });
+                        });
+                }
             },
             _ => {}
+        }
+
+        // Resize simulation grid responsively based on available central space
+        {
+            let avail = ctx.available_rect();
+            let cell = 8.0_f32; // target px per cell
+            let mut new_w = (avail.width() / cell).floor() as isize;
+            let mut new_h = (avail.height() / cell).floor() as isize;
+            new_w = new_w.max(50);
+            new_h = new_h.max(50);
+            let (new_w, new_h) = (new_w as usize, new_h as usize);
+            if new_w != self.simulation.width || new_h != self.simulation.height {
+                self.simulation = InteractiveFluid::new(new_w, new_h);
+                self.base_width = new_w;
+                self.base_height = new_h;
+            }
         }
 
         // Canvas fills the entire remaining space
