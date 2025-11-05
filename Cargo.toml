@@ -38,7 +38,7 @@ console_log = "0.2"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 getrandom = { version = "0.2", features = ["js"] }
-web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "CanvasRenderingContext2d", "History", "Location"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "CanvasRenderingContext2d", "History", "Location", "Element"] }
 log = "0.4"
 
 [dev-dependencies]

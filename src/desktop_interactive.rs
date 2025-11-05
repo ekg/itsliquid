@@ -68,6 +68,8 @@ pub struct InteractiveApp {
     url_state_loaded: bool,
     #[cfg(target_arch = "wasm32")]
     last_share_hash: Option<String>,
+    // Hide tool-specific panels to maximize canvas
+    ui_hide_controls: bool,
 }
 
 impl InteractiveApp {
@@ -113,6 +115,7 @@ impl InteractiveApp {
             url_state_loaded: false,
             #[cfg(target_arch = "wasm32")]
             last_share_hash: None,
+            ui_hide_controls: false,
         }
     }
 
@@ -141,7 +144,7 @@ enum ControlsDockMode {
 }
 
 impl eframe::App for InteractiveApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // WASM: on first frame, try to load share state from URL
         #[cfg(target_arch = "wasm32")]
         {
@@ -253,6 +256,43 @@ impl eframe::App for InteractiveApp {
                             ui.selectable_value(&mut self.controls_dock, ControlsDockMode::Top, "Top");
                             ui.selectable_value(&mut self.controls_dock, ControlsDockMode::Bottom, "Bottom");
                         });
+
+                    ui.separator();
+
+                    // Hide tool panels toggle (max canvas)
+                    let hide_lbl = if self.ui_hide_controls { "🎛 Show Controls" } else { "🎛 Hide Controls" };
+                    if ui.button(hide_lbl).clicked() {
+                        self.ui_hide_controls = !self.ui_hide_controls;
+                    }
+
+                    ui.separator();
+
+                    // Fullscreen toggle
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let fs = self.is_fullscreen_web();
+                        let label = if fs { "🗗 Exit Fullscreen" } else { "⛶ Fullscreen" };
+                        if ui.button(label).clicked() {
+                            if fs {
+                                let _ = self.exit_fullscreen_web();
+                            } else {
+                                let _ = self.request_fullscreen_web();
+                            }
+                        }
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        // Desktop: approximate by maximizing the window; true OS fullscreen may vary per platform
+                        let label = "⛶ Fullscreen";
+                        if ui.button(label).clicked() {
+                            // Try toggling fullscreen if available, else maximize
+                            #[allow(unused_must_use)]
+                            {
+                                // eframe 0.27: use frame.set_fullscreen if available via cfg attr
+                                frame.set_fullscreen(true);
+                            }
+                        }
+                    }
                 });
             });
         });
@@ -268,7 +308,7 @@ impl eframe::App for InteractiveApp {
         let use_side_panel = is_landscape; // prefer sidebar in landscape for full-height canvas
 
         // Show panels BEFORE CentralPanel to reserve space
-        if use_side_panel {
+        if !self.ui_hide_controls && use_side_panel {
             // Right side controls in landscape
             egui::SidePanel::right("tool_controls_side")
                 .resizable(true)
@@ -368,7 +408,7 @@ impl eframe::App for InteractiveApp {
                         }
                     });
                 });
-        } else {
+        } else if !self.ui_hide_controls {
             match self.selected_tool {
                 Tool::Dye => {
                 let panel_id = "color_controls";
@@ -1399,5 +1439,35 @@ impl InteractiveApp {
             }
         }
         None
+    }
+
+    fn is_fullscreen_web(&self) -> bool {
+        web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.fullscreen_element())
+            .is_some()
+    }
+
+    fn request_fullscreen_web(&self) -> Result<(), wasm_bindgen::JsValue> {
+        let window = web_sys::window().ok_or_else(|| wasm_bindgen::JsValue::from_str("no window"))?;
+        let document = window.document().ok_or_else(|| wasm_bindgen::JsValue::from_str("no document"))?;
+        // Prefer the canvas element
+        if let Some(elem) = document.get_element_by_id("the_canvas") {
+            elem.request_fullscreen()?;
+            return Ok(());
+        }
+        // Fallback to body
+        if let Some(body) = document.body() {
+            body.request_fullscreen()?;
+            return Ok(());
+        }
+        Err(wasm_bindgen::JsValue::from_str("no element to fullscreen"))
+    }
+
+    fn exit_fullscreen_web(&self) -> Result<(), wasm_bindgen::JsValue> {
+        let window = web_sys::window().ok_or_else(|| wasm_bindgen::JsValue::from_str("no window"))?;
+        let document = window.document().ok_or_else(|| wasm_bindgen::JsValue::from_str("no document"))?;
+        document.exit_fullscreen();
+        Ok(())
     }
 }
