@@ -257,7 +257,7 @@ impl eframe::App for InteractiveApp {
             });
         });
 
-        // Tool-specific panels - decide docking (top in landscape for visibility)
+        // Tool-specific panels - decide docking (top/bottom or side in landscape)
         let screen_rect = ctx.screen_rect();
         let is_landscape = screen_rect.width() >= screen_rect.height();
         let dock_top = match self.controls_dock {
@@ -265,10 +265,112 @@ impl eframe::App for InteractiveApp {
             ControlsDockMode::Top => true,
             ControlsDockMode::Bottom => false,
         };
+        let use_side_panel = is_landscape; // prefer sidebar in landscape for full-height canvas
 
         // Show panels BEFORE CentralPanel to reserve space
-        match self.selected_tool {
-            Tool::Dye => {
+        if use_side_panel {
+            // Right side controls in landscape
+            egui::SidePanel::right("tool_controls_side")
+                .resizable(true)
+                .default_width(260.0)
+                .min_width(220.0)
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                        match self.selected_tool {
+                            Tool::Dye => {
+                                ui.heading("Dye");
+                                ui.add_space(6.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label("Color:");
+                                    for (i, &color) in self.dye_colors.iter().enumerate() {
+                                        let color_32 = egui::Color32::from_rgb(
+                                            (color.0 * 255.0) as u8,
+                                            (color.1 * 255.0) as u8,
+                                            (color.2 * 255.0) as u8,
+                                        );
+                                        let size = egui::Vec2::new(26.0, 26.0);
+                                        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+                                        ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.2, egui::Color32::GRAY));
+                                        ui.painter().rect_filled(rect.shrink(2.0), 1.5, color_32);
+                                        if self.current_dye_index == i {
+                                            ui.painter().rect_stroke(rect.shrink(0.5), 1.5, egui::Stroke::new(2.0, egui::Color32::WHITE));
+                                        }
+                                        if response.clicked() {
+                                            self.current_dye_index = i;
+                                        }
+                                    }
+                                });
+                                ui.add_space(8.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Intensity:");
+                                    ui.add(egui::Slider::new(&mut self.dye_intensity, 0.1..=100.0).show_value(true).step_by(0.1));
+                                });
+                            }
+                            Tool::Force => {
+                                ui.heading("Force");
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Intensity:");
+                                    ui.add(egui::Slider::new(&mut self.force_intensity, 0.01..=3.0).show_value(true).step_by(0.01));
+                                });
+                            }
+                            Tool::Eyedropper => {
+                                ui.heading("Eyedropper");
+                                ui.add_space(6.0);
+                                if let Some((r, g, b)) = self.sampled_color {
+                                    let r_display = r / (1.0 + r);
+                                    let g_display = g / (1.0 + g);
+                                    let b_display = b / (1.0 + b);
+                                    let r_255 = (r_display * 255.0).round() as u8;
+                                    let g_255 = (g_display * 255.0).round() as u8;
+                                    let b_255 = (b_display * 255.0).round() as u8;
+                                    ui.horizontal(|ui| {
+                                        let color_32 = egui::Color32::from_rgb(r_255, g_255, b_255);
+                                        let size = egui::Vec2::new(26.0, 26.0);
+                                        let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
+                                        ui.painter().rect_stroke(rect, 1.5, egui::Stroke::new(1.2, egui::Color32::GRAY));
+                                        ui.painter().rect_filled(rect.shrink(2.0), 1.5, color_32);
+                                        ui.separator();
+                                        ui.label(format!("RGB: ({}, {}, {})", r_255, g_255, b_255));
+                                        ui.separator();
+                                        let hex_string = format!("#{:02X}{:02X}{:02X}", r_255, g_255, b_255);
+                                        ui.label("Hex:");
+                                        let mut hex_text = hex_string.clone();
+                                        ui.add(egui::TextEdit::singleline(&mut hex_text).desired_width(80.0).interactive(false));
+                                        ui.separator();
+                                        ui.label(format!("HDR: ({:.3}, {:.3}, {:.3})", r, g, b));
+                                    });
+                                } else {
+                                    ui.label("Click on a cell to sample its color");
+                                }
+                            }
+                            Tool::Attractor => {
+                                ui.heading("Attractor");
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Radius:");
+                                    ui.add(egui::Slider::new(&mut self.attractor_radius, 1.0..=200.0).show_value(true).step_by(1.0));
+                                });
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Strength:");
+                                    ui.add(egui::Slider::new(&mut self.attractor_strength, 0.1..=100.0).show_value(true).step_by(0.1));
+                                });
+                            }
+                            Tool::Eraser => {
+                                ui.heading("Eraser");
+                                ui.add_space(6.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Radius:");
+                                    ui.add(egui::Slider::new(&mut self.eraser_radius, 10.0..=100.0).show_value(true).step_by(1.0));
+                                });
+                            }
+                        }
+                    });
+                });
+        } else {
+            match self.selected_tool {
+                Tool::Dye => {
                 let panel_id = "color_controls";
                 if dock_top {
                     egui::TopBottomPanel::top(panel_id)
@@ -572,6 +674,7 @@ impl eframe::App for InteractiveApp {
                 }
             },
             _ => {}
+        }
         }
 
         // Resize simulation grid responsively based on available central space
