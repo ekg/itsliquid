@@ -61,6 +61,7 @@ pub struct InteractiveApp {
     placement_mode: bool,
     eraser_radius: f32,
     eraser_pos: Option<egui::Pos2>,
+    copy_feedback_until_frame: Option<usize>,
     #[cfg(target_arch = "wasm32")]
     url_state_loaded: bool,
     #[cfg(target_arch = "wasm32")]
@@ -104,6 +105,7 @@ impl InteractiveApp {
             placement_mode: false,
             eraser_radius: 30.0,
             eraser_pos: None,
+            copy_feedback_until_frame: None,
             #[cfg(target_arch = "wasm32")]
             url_state_loaded: false,
             #[cfg(target_arch = "wasm32")]
@@ -230,6 +232,23 @@ impl eframe::App for InteractiveApp {
                     ui.separator();
 
                     ui.label(format!("Grid: {}x{}", self.simulation.width, self.simulation.height));
+
+                    ui.separator();
+
+                    // Share link button (WASM only)
+                    #[cfg(target_arch = "wasm32")]
+                    if ui.button("🔗 Copy link").clicked() {
+                        if let Some(url) = self.compose_share_url() {
+                            ui.output_mut(|o| o.copied_text = url);
+                            // show a brief feedback label for ~2 seconds
+                            self.copy_feedback_until_frame = Some(self.frame_count.saturating_add(120));
+                        }
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        // Desktop build has no URL to copy; disable button
+                        let _disabled = ui.add_enabled(false, egui::Button::new("🔗 Copy link")).on_hover_text("Available on the web version");
+                    }
                 });
             });
         });
@@ -906,6 +925,20 @@ impl eframe::App for InteractiveApp {
         }
 
         ctx.request_repaint();
+
+        // Show copy feedback message briefly
+        if let Some(until) = self.copy_feedback_until_frame {
+            if self.frame_count <= until {
+                egui::Area::new(egui::Id::new("copy_feedback"))
+                    .fixed_pos(egui::pos2(12.0, 8.0))
+                    .show(ctx, |ui| {
+                        ui.visuals_mut().override_text_color = Some(egui::Color32::LIGHT_GREEN);
+                        ui.label("✅ Link copied to clipboard");
+                    });
+            } else {
+                self.copy_feedback_until_frame = None;
+            }
+        }
     }
 }
 
@@ -1077,5 +1110,27 @@ impl InteractiveApp {
             }
             self.last_share_hash = Some(hash);
         }
+    }
+
+    // Compose a full share URL using current location and state; ensures URL hash is up-to-date
+    fn compose_share_url(&mut self) -> Option<String> {
+        // Ensure we have the latest hash encoded
+        if let Some(hash) = self.encode_share_state() {
+            if let Some(window) = web_sys::window() {
+                // Replace the URL fragment while keeping origin/path
+                if let Ok(href) = window.location().href() {
+                    // Inject/replace hash
+                    let base = href.split('#').next().unwrap_or(&href);
+                    let full = format!("{}#{}", base, hash);
+                    // Also update history so address bar matches what we copied
+                    if let Some(history) = window.history().ok() {
+                        let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&full));
+                    }
+                    self.last_share_hash = Some(hash);
+                    return Some(full);
+                }
+            }
+        }
+        None
     }
 }
