@@ -523,7 +523,7 @@ impl eframe::App for InteractiveApp {
                         });
                 } else {
                     egui::TopBottomPanel::bottom(panel_id)
-                        .min_height(100.0)
+                        .min_height(130.0)
                         .show_separator_line(true)
                         .show(ctx, |ui| {
                             egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
@@ -595,7 +595,7 @@ impl eframe::App for InteractiveApp {
                         });
                 } else {
                     egui::TopBottomPanel::bottom(panel_id)
-                        .min_height(110.0)
+                        .min_height(130.0)
                         .show_separator_line(true)
                         .show(ctx, |ui| {
                             egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
@@ -660,7 +660,7 @@ impl eframe::App for InteractiveApp {
                         });
                 } else {
                     egui::TopBottomPanel::bottom(panel_id)
-                        .min_height(120.0)
+                        .min_height(130.0)
                         .show_separator_line(true)
                         .show(ctx, |ui| {
                             egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
@@ -701,7 +701,7 @@ impl eframe::App for InteractiveApp {
                         });
                 } else {
                     egui::TopBottomPanel::bottom(panel_id)
-                        .min_height(100.0)
+                        .min_height(130.0)
                         .show_separator_line(true)
                         .show(ctx, |ui| {
                             egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
