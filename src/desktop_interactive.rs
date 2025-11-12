@@ -132,6 +132,9 @@ impl InteractiveApp {
             self.mouse_start_pos = None;
             self.mouse_current_pos = None;
             self.continuous_color_pos = None;
+
+            // Clear persistent elements since they have coordinates for old grid
+            self.persistent_elements.clear();
         }
     }
 }
@@ -718,9 +721,11 @@ impl eframe::App for InteractiveApp {
         }
 
         // Resize simulation grid responsively based on available central space
+        // Respect resolution_scale: higher scale = more cells (smaller cell size)
         {
             let avail = ctx.available_rect();
-            let cell = 8.0_f32; // target px per cell
+            let base_cell = 8.0_f32; // target px per cell at 1x
+            let cell = base_cell / self.resolution_scale as f32;
             let mut new_w = (avail.width() / cell).floor() as isize;
             let mut new_h = (avail.height() / cell).floor() as isize;
             new_w = new_w.max(50);
@@ -728,8 +733,8 @@ impl eframe::App for InteractiveApp {
             let (new_w, new_h) = (new_w as usize, new_h as usize);
             if new_w != self.simulation.width || new_h != self.simulation.height {
                 self.simulation = InteractiveFluid::new(new_w, new_h);
-                self.base_width = new_w;
-                self.base_height = new_h;
+                self.base_width = new_w / self.resolution_scale;
+                self.base_height = new_h / self.resolution_scale;
             }
         }
 
@@ -788,15 +793,7 @@ impl eframe::App for InteractiveApp {
                             }
                         }
 
-                        // Disable placement mode when interaction ends
-                        if response.drag_stopped() {
-                            self.placement_mode = false;
-                        } else if !response.dragged() && !response.is_pointer_button_down_on() {
-                            // Also disable if not dragging and pointer is up (handles single click)
-                            if is_interacting {
-                                self.placement_mode = false;
-                            }
-                        }
+                        // Placement mode stays on - user toggles it off manually
                     } else {
                         // Normal mode: Click/tap to add dye, hold to paint continuously
                         if response.clicked() || response.dragged() {
@@ -893,8 +890,7 @@ impl eframe::App for InteractiveApp {
                                     y: grid_y,
                                     radius: 3.0,
                                 });
-
-                                self.placement_mode = false;
+                                // Placement mode stays on
                             }
                         }
 
@@ -937,7 +933,7 @@ impl eframe::App for InteractiveApp {
                                     y: grid_y,
                                     radius: self.attractor_radius / cell_size,
                                 });
-                                self.placement_mode = false;
+                                // Placement mode stays on
                             }
                         }
                     } else {
