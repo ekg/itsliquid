@@ -735,6 +735,8 @@ impl eframe::App for InteractiveApp {
                 self.simulation = InteractiveFluid::new(new_w, new_h);
                 self.base_width = new_w / self.resolution_scale;
                 self.base_height = new_h / self.resolution_scale;
+                // Note: Don't clear persistent elements here - only on manual resolution change
+                // Responsive resize from window/panel changes should preserve elements
             }
         }
 
